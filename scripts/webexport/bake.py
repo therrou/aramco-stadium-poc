@@ -67,19 +67,19 @@ def _loop_triangles(objs):
     return np.concatenate(tris), np.concatenate(faces)
 
 
-def _chart_uvs(objs, size, texels_per_m, cell):
+def _chart_uvs(objs, size, texels_per_m, cell, layer="LightmapUV"):
     n, area, cen, tot, co = _group_mesh(objs)
     tris = _loop_triangles(objs)
     uv, stats = uvpack.chart_uvs(n, area, cen, tot, co, size, texels_per_m, cell, tris=tris)
     off = 0
     for o in objs:
         L = len(o.data.loops)
-        o.data.uv_layers["LightmapUV"].data.foreach_set("uv", uv[off:off + L].astype(np.float32).ravel())
+        o.data.uv_layers[layer].data.foreach_set("uv", uv[off:off + L].astype(np.float32).ravel())
         off += L
     # post-pack check on what the mesh (and so the glb) actually holds: float32 UVs
     stored = []
     for o in objs:
-        d = o.data.uv_layers["LightmapUV"].data
+        d = o.data.uv_layers[layer].data
         a = np.empty(len(d) * 2, np.float32)
         d.foreach_get("uv", a)
         stored.append(a.reshape(-1, 2))
@@ -326,3 +326,153 @@ def sun_check(path, n):
     e, a = math.radians(24 - 22 * t), math.radians(235 + 55 * t)
     s = (math.cos(e) * math.sin(a), math.cos(e) * math.cos(a), math.sin(e))
     return math.degrees(math.acos(max(-1, min(1, sum(p * q for p, q in zip(d, s))))))
+
+
+# ---------------------------------------------------------------------------------------------
+# Procedural base colour and night emission -> textures on UV0 ("UVMap"), Task 11.
+# UV0 never touches "LightmapUV" (shared by the three baked lightmap states).
+
+SURFACE_HI = 2048                # albedo/emission atlas cap (size-budget knob)
+SURFACE_LO = 512                 # floor: at 256 the 4-px chart gutters eat most of the atlas
+SURFACE_CELL_M = 16.0
+# Materials whose detail is far finer than any unique atlas can hold: the city window pattern
+# (3D Voronoi cells of ~1.1 m on 4.8 km2 of facade) would be sub-texel at 2048 and bake to a
+# uniform glow. They get a box-projected, repeating UV0 (world metres / tile) and one baked tile
+# of the same material instead: prefix -> (tile edge in metres, tile pixels).
+SURFACE_TILE = {"M_Building": (64.0, 1024)}
+SURFACE_STATS = {}               # obj name -> UV0 / bake stats
+
+
+def _tile_of(mat_name):
+    return next((v for k, v in SURFACE_TILE.items() if mat_name.startswith(k)), None)
+
+
+def _uv0_charts(obj, size, texels_per_m):
+    """Unique, overlap-checked UV0 atlas from uvpack (smart_project packing is unusable on 5.2)."""
+    st = _chart_uvs([obj], size, texels_per_m, SURFACE_CELL_M, layer="UVMap")
+    if st["stored_overlap_texels"] > OVERLAP_TOLERANCE * max(st["covered_texels"], 1):
+        raise RuntimeError(f"UV0 of {obj.name} overlaps: {st['stored_overlap_texels']} texels")
+    return st
+
+
+def _uv0_box(obj, tile):
+    """UV0 = world metres / tile on the face's dominant axis plane (repeat-wrapped in glTF)."""
+    n, _, _, tot, co = _group_mesh([obj])
+    ax = np.repeat(np.abs(n).argmax(1), tot)                      # dominant axis per loop
+    u = np.where(ax == 0, co[:, 1], co[:, 0])
+    v = np.where(ax == 2, co[:, 1], co[:, 2])
+    uv = np.stack([u, v], 1) / tile
+    obj.data.uv_layers["UVMap"].data.foreach_set("uv", uv.astype(np.float32).ravel())
+    return {"mode": "box", "tile_m": tile}
+
+
+def _to_srgb(lin):
+    lin = np.clip(lin, 0.0, 1.0)
+    return np.where(lin <= 0.0031308, lin * 12.92, 1.055 * np.power(lin, 1 / 2.4) - 0.055)
+
+
+def _tile_plane(tile, key):
+    """Temporary T x T quad (object coords = metres) with UV0 over [0, 1]. Its position in the
+    procedural's object space depends on `key`, so materials sharing a pattern get different tiles."""
+    import zlib
+    x0 = 257.0 * (zlib.crc32(key.encode()) % 31)       # <= 8 km: float32 noise precision stays fine
+    me = bpy.data.meshes.new("_surf_tile")
+    me.from_pydata([(x0, 0, 0), (x0 + tile, 0, 0), (x0 + tile, tile, 0), (x0, tile, 0)], [], [(0, 1, 2, 3)])
+    uvl = me.uv_layers.new(name="UVMap")
+    uvl.data.foreach_set("uv", [0, 0, 1, 0, 1, 1, 0, 1])
+    ob = bpy.data.objects.new("_surf_tile", me)
+    bpy.data.scenes[webscene.WEB].collection.objects.link(ob)
+    return ob
+
+
+def bake_surface(obj, info, scale, samples):
+    """Base colour (DIFFUSE/COLOR) and night emission (EMIT at n=1) for node-driven materials.
+
+    Bakes through a copy of the source material (never the shared original) and restores the
+    object's '.web' material whatever happens. Writes build/web_raw/surfaces/<obj>_{base,emission}.png;
+    returns {"base"?: image name, "emission"?: image name, "emNight"?: peak linear emission}."""
+    out = {}
+    tile = _tile_of(obj["srcMat"])
+    if tile:
+        size = tile[1]
+        SURFACE_STATS[obj.name] = _uv0_box(obj, tile[0])
+    else:
+        tpm = groups.ALBEDO_TEXELS_PER_M[obj["lightmap"]] * scale
+        size = texel.atlas_size(_area([obj]), tpm, lo=SURFACE_LO, hi=SURFACE_HI)
+        SURFACE_STATS[obj.name] = dict(_uv0_charts(obj, size, tpm), mode="atlas")
+    SURFACE_STATS[obj.name]["size"] = size
+    jobs = []
+    if info["kind"] == "procedural":
+        jobs.append(("base", "DIFFUSE", {"COLOR"}, 0.0))
+    if info["emission"] and info["emission"]["baked"]:
+        jobs.append(("emission", "EMIT", set(), 1.0))
+    keep = obj.data.materials[0]                                   # original first, never a stand-in
+    if keep is None or keep.name.startswith(("_bake_", "_surf_")):
+        keep = bpy.data.materials.get(obj["srcMat"] + ".web")
+        if keep is None:
+            raise RuntimeError(f"{obj.name}: no .web material to restore")
+    src = plane = None
+    entered = False
+    try:
+        src = bpy.data.materials[obj["srcMat"]].copy()              # never bake the shared original
+        src.name = "_surf_" + obj["srcMat"]
+        target = obj
+        if tile:
+            plane = target = _tile_plane(tile[0], obj["srcMat"])
+            plane.data.materials.append(src)
+        else:
+            obj.data.materials[0] = src
+        target.data.uv_layers.active = target.data.uv_layers["UVMap"]
+        webscene.enter()
+        entered = True
+        sc = bpy.context.scene
+        sc.cycles.samples = max(16, samples // 4)
+        sc.render.bake.margin = 4
+        sc.render.bake.margin_type = "EXTEND"
+        for kind, btype, passes, n in jobs:
+            webscene.set_state(n)
+            name = f"{obj.name}_{kind}"
+            for nm in (name, name + "_hdr"):
+                if bpy.data.images.get(nm) is not None:
+                    bpy.data.images.remove(bpy.data.images[nm])
+            img = bpy.data.images.new(name + ("_hdr" if kind == "emission" else ""), size, size,
+                                      float_buffer=(kind == "emission"))
+            node = src.node_tree.nodes.new("ShaderNodeTexImage")
+            node.image = img
+            src.node_tree.nodes.active = node
+            for o in sc.objects:
+                o.select_set(False)
+            target.select_set(True)
+            bpy.context.view_layer.objects.active = target
+            bpy.ops.object.bake(type=btype, pass_filter=passes, use_clear=True)
+            src.node_tree.nodes.remove(node)
+            if kind == "emission":                                   # HDR -> LDR map x strength
+                buf = np.empty(size * size * 4, np.float32)
+                img.pixels.foreach_get(buf)
+                px = buf.reshape(size, size, 4)
+                peak = float(px[..., :3].max()) or 1.0
+                out["emNight"] = round(peak, 4)
+                SURFACE_STATS[obj.name]["emission_lit_pct"] = round(float((px[..., :3].max(-1) > 0.02 * peak).mean()) * 100, 2)
+                px[..., :3] = _to_srgb(px[..., :3] / peak)          # byte sRGB image stores encoded values
+                px[..., 3] = 1.0
+                ldr = bpy.data.images.new(name, size, size)
+                ldr.pixels.foreach_set(px.ravel())
+                bpy.data.images.remove(img)
+                img = ldr
+            img.filepath_raw = os.path.join(RAW, "surfaces", f"{name}.png")
+            os.makedirs(os.path.dirname(img.filepath_raw), exist_ok=True)
+            img.file_format = "PNG"
+            img.save()
+            out[kind] = img.name
+    finally:
+        if entered:
+            webscene.leave()
+        obj.data.materials[0] = keep
+        obj.data.uv_layers.active = obj.data.uv_layers["UVMap"]
+        if plane is not None:
+            me = plane.data
+            bpy.data.objects.remove(plane, do_unlink=True)
+            bpy.data.meshes.remove(me)
+        if src is not None:
+            bpy.data.materials.remove(src)
+    return out

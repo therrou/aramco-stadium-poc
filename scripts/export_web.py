@@ -123,10 +123,33 @@ def stage_bake(report, quality, only_states=None, only_groups=None):
         webscene.set_state(night0)                  # the render scene ends as it started
 
 
-STAGES = {"data": stage_data, "geometry": stage_geometry, "bake": stage_bake}
+def stage_surfaces(report, quality):
+    """Procedural base colour / baked night emission -> UV0 textures on the '.web' materials.
+    Runs before "bake": it only writes UV0 ("UVMap"), never the shared LightmapUV."""
+    from webexport import bake, gltfout, matinfo, webscene
+    q = bake.QUALITY[quality]
+    objs = [o for o in bpy.data.scenes[webscene.WEB].objects if o.get("webexport")]
+    night0 = bpy.data.scenes[SOURCE_SCENE].get("night", 0.0)
+    done = []
+    try:
+        for o in objs:
+            info = matinfo.classify(bpy.data.materials[o["srcMat"]])
+            if info["kind"] != "procedural" and not (info["emission"] and info["emission"]["baked"]):
+                continue
+            baked = bake.bake_surface(o, info, q["scale"], q["samples"])
+            o.data.materials[0] = gltfout.web_material(info, baked)
+            done.append((o.name, sorted(k for k in baked if k != "emNight"), baked.get("emNight")))
+    finally:
+        webscene.set_state(night0)                  # the render scene ends as it started
+    gltfout.export_glb(objs, os.path.join(RAW, "stadium.glb"))
+    report["surfaces"] = done
+    report["surface_uv"] = dict(bake.SURFACE_STATS)
 
 
-def run(stages=("data", "geometry", "bake", "trees"), quality="draft"):
+STAGES = {"data": stage_data, "geometry": stage_geometry, "surfaces": stage_surfaces, "bake": stage_bake}
+
+
+def run(stages=("data", "geometry", "surfaces", "bake", "trees"), quality="draft"):
     _reload()
     report = {"quality": quality}
     for s in stages:

@@ -11,10 +11,11 @@ import { SectionPatches } from "./sectionPatches";
 import { CameraRig } from "./camera";
 import { cameraPose, sectionFraming, type Pose } from "./flyto";
 import { onClick } from "./picking";
-import { reduce, initialState, type Action } from "./state";
-import type { State } from "./loader";
+import { reduce, initialState, parseLighting, type Action } from "./state";
+import { STATES, type State } from "./loader";
 import { setupStadiumMaterials, type SharedUniforms } from "./stadium";
 import { Lighting, makeComposer } from "./lighting";
+import { missingLightmaps } from "./lightingState";
 
 const params = new URLSearchParams(location.search);
 
@@ -55,11 +56,21 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   rig.jump(camParam && a.cameras[camParam] ? cameraPose(a.cameras[camParam]) : overview);
   const camera = rig.camera;
   const shared: SharedUniforms = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: a.manifest.rgbmRange }, uNight: { value: 0 } };
-  const groups = setupStadiumMaterials(a.stadium.scene, shared, Object.keys(a.lightmaps.day).length > 0);
+  // one "lightmaps present" flag for materials and Lighting: every state needs every group, else no lightmaps at all
+  const glbGroups = new Set<string>();
+  a.stadium.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh && typeof o.userData.lightmap === "string") glbGroups.add(o.userData.lightmap); });
+  const missing = missingLightmaps(a.lightmaps, glbGroups);
+  const useLightmaps = missing.length === 0;
+  if (!useLightmaps && STATES.some((s) => Object.keys(a.lightmaps[s]).length > 0))
+    console.warn(`Lighting: incomplete lightmap bake, using fallback lights. Missing: ${missing.join(", ")}`);
+  const groups = setupStadiumMaterials(a.stadium.scene, shared, useLightmaps);
   const emissive = new Set<THREE.MeshStandardMaterial>();   // Set: the optimized glb shares materials between meshes
-  a.stadium.scene.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial; if (m?.userData?.emNight > 0) emissive.add(m); });
-  const startState = (params.get("state") as State | null) ?? initialState.lighting;
-  const lighting = new Lighting(renderer, scene, a, groups, [...emissive], startState, shared);
+  a.stadium.scene.traverse((o) => {
+    const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial;
+    if (m?.userData && (m.userData.emDay > 0 || m.userData.emNight > 0)) emissive.add(m);
+  });
+  const startState = parseLighting(params.get("state"));
+  const lighting = new Lighting(renderer, scene, a, groups, [...emissive], startState, shared, useLightmaps);
   const composer = makeComposer(renderer, scene, camera);
   const perf = new Perf(params.has("stats"));
   const resize = () => {

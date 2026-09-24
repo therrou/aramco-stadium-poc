@@ -1,5 +1,5 @@
 import type { V3 } from "./coords";
-import type { State } from "./loader";
+import { STATES, type State } from "./loader";
 
 export const STATE_NIGHT: Record<State, number> = { day: 0, golden: 0.6, night: 1 };
 export const TRANSITION_S = 1.0;
@@ -36,3 +36,23 @@ export function sunToward(n: number): V3 {
 }
 export const sunStrength = (n: number) => 3 * Math.max(0, 1 - (n / 0.85) ** 2);
 export const sunColor = (n: number): V3 => [1, 0.93 - 0.33 * T(n), 0.82 - 0.52 * T(n)];
+
+/**
+ * The single "lightmaps present" check (fix round 1): every state must have a lightmap for every group,
+ * where the groups are those the glb references plus any the manifest lists. Returns "state/group" for
+ * each gap; an empty list means the lightmap path can be used.
+ */
+export function missingLightmaps(lightmaps: Record<State, Record<string, unknown>>, glbGroups: Iterable<string>): string[] {
+  const groups = new Set(glbGroups);
+  for (const s of STATES) for (const g of Object.keys(lightmaps[s])) groups.add(g);
+  if (groups.size === 0) return ["(no lightmap groups)"];
+  const out: string[] = [];
+  for (const s of STATES) for (const g of groups) if (!lightmaps[s][g]) out.push(`${s}/${g}`);
+  return out;
+}
+
+/** uEnvB is sampled with the "from" PMREM's CUBEUV defines, so all env HDRs must share one size. */
+export function envSizeMismatch(sizes: { width: number; height: number }[]): string | null {
+  const k = sizes.map((d) => `${d.width}x${d.height}`);
+  return new Set(k).size > 1 ? `env HDR sizes differ (${k.join(", ")})` : null;
+}

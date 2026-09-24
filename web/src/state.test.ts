@@ -23,3 +23,17 @@ describe("app state", () => {
     expect(s.view.kind).toBe("section");
   });
 });
+
+import { parseLighting } from "./state";
+describe("?state= param (fix round 1)", () => {
+  it("accepts day/golden/night", () => {
+    expect(parseLighting("day")).toBe("day");
+    expect(parseLighting("golden")).toBe("golden");
+    expect(parseLighting("night")).toBe("night");
+  });
+  it("falls back to the initial lighting otherwise", () => {
+    expect(parseLighting(null)).toBe(initialState.lighting);
+    expect(parseLighting("dusk")).toBe(initialState.lighting);
+    expect(parseLighting("")).toBe(initialState.lighting);
+  });
+});

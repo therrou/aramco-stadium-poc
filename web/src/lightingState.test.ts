@@ -53,3 +53,32 @@ describe("Blender formulas", () => {
     expect(sunStrength(1)).toBe(0);
   });
 });
+
+import { missingLightmaps, envSizeMismatch } from "./lightingState";
+
+describe("lightmaps-present flag (fix round 1)", () => {
+  const full = { day: { bowl: 1, site: 1 }, golden: { bowl: 1, site: 1 }, night: { bowl: 1, site: 1 } };
+  it("complete bake -> nothing missing", () => {
+    expect(missingLightmaps(full, ["bowl", "site"])).toEqual([]);
+  });
+  it("no bake -> everything missing", () => {
+    const none = { day: {}, golden: {}, night: {} };
+    expect(missingLightmaps(none, ["bowl"])).toEqual(["day/bowl", "golden/bowl", "night/bowl"]);
+  });
+  it("partial bake names what is missing, including groups only some states have", () => {
+    const partial = { day: { bowl: 1, site: 1 }, golden: { bowl: 1 }, night: { bowl: 1, extra: 1 } };
+    expect(missingLightmaps(partial, ["bowl", "site"])).toEqual(["day/extra", "golden/site", "golden/extra", "night/site"]);
+  });
+  it("no groups at all counts as missing", () => {
+    expect(missingLightmaps({ day: {}, golden: {}, night: {} }, [])).toEqual(["(no lightmap groups)"]);
+  });
+});
+
+describe("env size check (fix round 1)", () => {
+  it("same size -> null", () => {
+    expect(envSizeMismatch([{ width: 1024, height: 512 }, { width: 1024, height: 512 }, { width: 1024, height: 512 }])).toBeNull();
+  });
+  it("different size -> message naming the sizes", () => {
+    expect(envSizeMismatch([{ width: 1024, height: 512 }, { width: 2048, height: 1024 }, { width: 1024, height: 512 }])).toMatch(/2048x1024/);
+  });
+});

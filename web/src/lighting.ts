@@ -4,7 +4,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { ENV_ROTATION_Y, toThree } from "./coords";
-import { LightingTransition, emissionStrength, exposure, sunColor, sunStrength, sunToward } from "./lightingState";
+import { LightingTransition, emissionStrength, envSizeMismatch, exposure, sunColor, sunStrength, sunToward } from "./lightingState";
 import { STATES, type Assets, type State } from "./loader";
 import { Sky } from "./background";
 import type { SharedUniforms } from "./stadium";
@@ -28,10 +28,18 @@ export class Lighting {
   private fallbackHemi?: THREE.HemisphereLight;
   private bg = new THREE.Color();
   private shown = "";
+  /** false when all env maps exist but differ in size: specular then switches to the target env, no blend. */
+  private envBlend = true;
+  readonly hasEnv: boolean;
   constructor(private renderer: THREE.WebGLRenderer, private scene: THREE.Scene, private a: Assets,
               private groups: Map<string, THREE.MeshStandardMaterial[]>, private emissive: THREE.MeshStandardMaterial[], initial: State,
-              public shared: SharedUniforms) {
+              public shared: SharedUniforms, readonly hasLightmaps: boolean) {
     this.t = new LightingTransition(initial);
+    this.hasEnv = STATES.every((s) => a.env[s]);
+    if (this.hasEnv) {
+      const bad = envSizeMismatch(STATES.map((s) => a.env[s]!.image as { width: number; height: number }));
+      if (bad) { console.warn(`Lighting: ${bad}; specular env maps will switch without blending.`); this.envBlend = false; }
+    }
     this.shared.uRgbmRange.value = a.manifest.rgbmRange;
     const gen = new THREE.PMREMGenerator(renderer);
     for (const s of STATES) if (a.env[s]) this.pmrem[s] = gen.fromEquirectangular(a.env[s]!).texture;
@@ -44,8 +52,6 @@ export class Lighting {
     }
     this.update(0, 0);   // bind lightMap/envMap before the first compile, so USE_LIGHTMAP/USE_ENVMAP are set
   }
-  get hasLightmaps() { return STATES.every((s) => Object.keys(this.a.lightmaps[s]).length > 0); }
-  get hasEnv() { return STATES.every((s) => this.a.env[s]); }
   request(s: State) { this.t.request(s); }
   update(dt: number, cameraExposure: number) {
     this.t.update(dt);
@@ -58,13 +64,14 @@ export class Lighting {
         (m.userData.lmB as { value: THREE.Texture | null }).value = this.a.lightmaps[to][g] ?? null;
       }
       if (this.hasEnv) {
-        for (const mats of this.groups.values()) for (const m of mats) { m.envMap = this.pmrem[from]!; m.envMapRotation.set(0, ENV_ROTATION_Y, 0); }
+        const envA = this.pmrem[this.envBlend ? from : to]!;   // no blend: both samplers get the target env
+        for (const mats of this.groups.values()) for (const m of mats) { m.envMap = envA; m.envMapRotation.set(0, ENV_ROTATION_Y, 0); }
         this.shared.uEnvB.value = this.pmrem[to]!;
         this.sky.setTextures(this.a.env[from]!, this.a.env[to]!);
       }
     }
     this.shared.uLmBlend.value = e;
-    this.shared.uEnvBlend.value = e;
+    this.shared.uEnvBlend.value = this.envBlend ? e : 0;
     this.shared.uNight.value = n;
     this.sky.setBlend(e);
     for (const m of this.emissive) m.emissiveIntensity = emissionStrength(m.userData.emDay ?? 0, m.userData.emNight ?? 0, n);

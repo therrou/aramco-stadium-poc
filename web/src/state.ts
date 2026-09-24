@@ -1,4 +1,4 @@
-import type { State } from "./loader";
+import { STATES, type State } from "./loader";
 
 export type View = { kind: "overview" } | { kind: "section"; section: number };
 export interface AppState { view: View; lighting: State }
@@ -23,3 +23,7 @@ export function reduce(s: AppState, a: Action): AppState {
       return s;
   }
 }
+
+/** `?state=` URL param: only day/golden/night are accepted. */
+export const parseLighting = (v: string | null): State =>
+  STATES.includes(v as State) ? (v as State) : initialState.lighting;

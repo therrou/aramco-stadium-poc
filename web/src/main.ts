@@ -13,6 +13,8 @@ import { cameraPose, sectionFraming, type Pose } from "./flyto";
 import { onClick } from "./picking";
 import { reduce, initialState, type Action } from "./state";
 import type { State } from "./loader";
+import { setupStadiumMaterials, type SharedUniforms } from "./stadium";
+import { Lighting, makeComposer } from "./lighting";
 
 const params = new URLSearchParams(location.search);
 
@@ -52,24 +54,29 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const camParam = params.get("cam");
   rig.jump(camParam && a.cameras[camParam] ? cameraPose(a.cameras[camParam]) : overview);
   const camera = rig.camera;
-  // fallback lighting until lightmaps exist (Review Focus 4); lighting.ts replaces this in Task 9
-  scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x6b5a40, 1.2));
-  const sun = new THREE.DirectionalLight(0xfff0dd, 2.5);
-  sun.position.set(-300, 250, 200);
-  scene.add(sun);
+  const shared: SharedUniforms = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: a.manifest.rgbmRange }, uNight: { value: 0 } };
+  const groups = setupStadiumMaterials(a.stadium.scene, shared, Object.keys(a.lightmaps.day).length > 0);
+  const emissive = new Set<THREE.MeshStandardMaterial>();   // Set: the optimized glb shares materials between meshes
+  a.stadium.scene.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial; if (m?.userData?.emNight > 0) emissive.add(m); });
+  const startState = (params.get("state") as State | null) ?? initialState.lighting;
+  const lighting = new Lighting(renderer, scene, a, groups, [...emissive], startState, shared);
+  const composer = makeComposer(renderer, scene, camera);
   const perf = new Perf(params.has("stats"));
   const resize = () => {
     const [w, h] = (params.get("size") ?? `${innerWidth}x${innerHeight}`).split("x").map(Number);
     renderer.setSize(w, h, false);
     rig.resize(w, h);
+    composer.setSize(w, h);
   };
   addEventListener("resize", resize);
   resize();
   renderer.info.autoReset = false;
-  exposeViewerHooks({ get fps() { return perf.fps; }, info: renderer.info, flyTo: (p: Pose) => rig.flyTo(p) });
+  exposeViewerHooks({ get fps() { return perf.fps; }, info: renderer.info, flyTo: (p: Pose) => rig.flyTo(p),
+    setState: (s: State) => dispatch({ type: "lighting", lighting: s }),
+    get night() { return lighting.t.night; }, tick: (dt = 1 / 60) => frame(dt) });
 
-  let app = initialState;
-  let lightingChanged: ((l: State) => void) | undefined;   // set in Task 9
+  let app = { ...initialState, lighting: startState };
+  const lightingChanged = (l: State) => lighting.request(l);
   const secById = new Map(a.sections.sections.map((s) => [Number(s.id), s]));
   const ray = new THREE.Raycaster();
   const dispatch = (act: Action) => {
@@ -78,7 +85,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     if (app === prev) return;
     if (act.type === "section" && app.view.kind === "section") rig.flyTo(sectionFraming(secById.get(app.view.section)!));
     if (act.type === "back") rig.flyTo(overview);
-    if (act.type === "lighting") lightingChanged?.(app.lighting);
+    if (act.type === "lighting") lightingChanged(app.lighting);
     draw();
   };
   const draw = () => {
@@ -103,14 +110,20 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   draw();
 
   const clock = new THREE.Clock();
-  renderer.setAnimationLoop(() => {
-    perf.begin();
-    renderer.info.reset();
-    rig.update(clock.getDelta());
+  const camDef = camParam ? a.cameras[camParam] : undefined;
+  const frame = (dt: number) => {
+    rig.update(dt);
     const vis = visibleSections(toBlender(camera.position), a.sections.sections, SEAT_LOD_DIST, app.view.kind === "section" ? app.view.section : -1);
     seats.setVisibleSections(vis);
     patches.setHidden(vis);
-    renderer.render(scene, camera);
+    const camExp = app.view.kind === "overview" ? (camDef?.exposure ?? -0.4) : 0.1;
+    lighting.update(dt, camExp);
+    composer.render(dt);
+  };
+  renderer.setAnimationLoop(() => {
+    perf.begin();
+    renderer.info.reset();
+    frame(clock.getDelta());
     perf.end();
   });
 }

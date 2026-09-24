@@ -1,7 +1,7 @@
 """RGBM: HDR lightmaps in 8-bit RGBA (linear, not sRGB). rgb = c.rgb * c.a * RANGE."""
 import numpy as np
 
-RANGE = 8.0
+RANGE = 16.0                     # R10: 8 clipped ~10 % of the sails' texels
 
 
 def encode(rgb):

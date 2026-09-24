@@ -8,7 +8,7 @@ def test_new_has_three_states():
     assert list(m["states"]) == ["day", "golden", "night"]
     assert m["states"]["golden"]["night"] == 0.6
     assert m["states"]["night"]["exposure"] == 0.75
-    assert m["rgbmRange"] == 8.0
+    assert m["rgbmRange"] == 16.0
 
 
 def test_merge_is_deep_and_persistent(tmp_path):

@@ -6,7 +6,7 @@ import os
 import bpy
 import numpy as np
 
-from . import groups, rgbm, texel, webscene
+from . import groups, rgbm, texel, uvpack, webscene
 
 RAW = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "build", "web_raw")
 QUALITY = {"draft": {"scale": 0.5, "samples": 64}, "full": {"scale": 1.0, "samples": 256}}
@@ -18,15 +18,9 @@ def _area(objs):
     return sum(p.area for o in objs for p in o.data.polygons)
 
 
-# Deviation from the brief (smart_project + pack_islands): smart-project splits every stepped tier
-# into sub-texel tread/riser strips and turns treads, slabs and pitch lines into closed rings whose
-# boxes span the whole bowl; the bowl atlas came out 1 % used. Charts are built here instead:
-# faces are cut on a world XY grid, grouped into connected pieces (vertices welded by position,
-# across the group's objects) that are height fields along their mean normal, projected on that
-# plane and shelf-packed at one shared texel density.
+# UV charts and packing live in uvpack.py (pure numpy, host-tested); see its docstring.
 CELL_M = {"site": 64.0}          # grid cell per group (default 16 m)
-MARGIN_PX = 4.0                  # gutter between charts, in atlas texels
-SMALL_TEXELS = 16.0              # charts under this many texels are merged per (cell, axis)
+OVERLAP_TOLERANCE = 0.001        # max fraction of covered texels written twice (float32 edge rounding)
 
 
 def _group_mesh(objs):
@@ -54,139 +48,44 @@ def _group_mesh(objs):
             np.concatenate(tot), np.concatenate(co))
 
 
-def _components(a, b, cls):
-    """Connected components over face pairs (a, b), never joining faces of different `cls`."""
-    keep = cls[a] == cls[b]
-    a, b = a[keep], b[keep]
-    lab = np.arange(len(cls))
-    while True:
-        m = np.minimum(lab[a], lab[b])
-        new = lab.copy()
-        np.minimum.at(new, a, m)
-        np.minimum.at(new, b, m)
-        new = new[new]
-        if (new == lab).all():
-            return np.unique(lab, return_inverse=True)[1]
-        lab = new
-
-
-def _mean_normal(lab, n, area):
-    N = np.zeros((lab.max() + 1, 3))
-    np.add.at(N, lab, n * area[:, None])
-    ln = np.linalg.norm(N, axis=1)
-    N[ln < 1e-9] = (0, 0, 1)
-    ln[ln < 1e-9] = 1.0
-    return N / ln[:, None]
-
-
-def _charts(n, area, cen, tot, co, cell, min_area=0.0):
-    """Chart id per face and the projection normal per chart."""
-    F = len(n)
-    fol = np.repeat(np.arange(F), tot)                                 # face of loop
-    key = np.unique(np.round(co * 1000).astype(np.int64), axis=0, return_inverse=True)[1].ravel()
-    order = np.argsort(key, kind="stable")
-    ks, fs = key[order], fol[order]
-    head = np.r_[True, ks[1:] != ks[:-1]]
-    a, b = fs, fs[head][np.cumsum(head) - 1]
-    pair = np.unique(np.stack([a[a != b], b[a != b]], 1), axis=0)
-    a, b = pair[:, 0], pair[:, 1]
-    cell_id = np.unique(np.floor(cen[:, :2] / cell), axis=0, return_inverse=True)[1].ravel()
-    cls = cell_id * 2 + (n[:, 2] < -0.05)
-    chart = np.full(F, -1)
-    todo = np.ones(F, bool)
-    for level in range(4):
-        if level == 3:                                                 # leftovers: split by dominant axis
-            ax = np.abs(n).argmax(1)
-            cls = cls * 6 + ax * 2 + (n[np.arange(F), ax] < 0)
-        lab = _components(a, b, np.where(todo, cls, -1 - np.arange(F)))
-        N = _mean_normal(lab, n, area)
-        ok = (n * N[lab]).sum(1) > 0.15
-        bad = np.zeros(lab.max() + 1, bool)
-        np.logical_or.at(bad, lab, ~ok & todo)
-        done = todo & (~bad[lab] | (level == 3))
-        base = chart.max() + 1
-        chart[done] = base + np.unique(lab[done], return_inverse=True)[1].ravel()
-        todo &= ~done
-        cls = lab * 2 + ok                                             # split bad pieces into fits / rest
-        if not todo.any():
-            break
-    # sub-texel charts cost a full gutter each: merge them per (cell, axis), overlaps are invisible there
-    small = np.bincount(chart, area)[chart] < min_area
-    if small.any():
-        ax = np.abs(n).argmax(1)
-        key = np.stack([cell_id, ax * 2 + (n[np.arange(F), ax] < 0)], 1)[small]
-        chart[small] = chart.max() + 1 + np.unique(key, axis=0, return_inverse=True)[1].ravel()
-        chart = np.unique(chart, return_inverse=True)[1].ravel()
-    return chart, _mean_normal(chart, n, area), fol
-
-
-def _shelf(w, h, S):
-    """Shelf-pack rects (sorted by height, desc) into an S-wide strip; returns x, y and the used height."""
-    order = np.argsort(-h, kind="stable")
-    x, y = np.empty(len(w)), np.empty(len(w))
-    cx = cy = sh = 0.0
-    for i in order:
-        if cx + w[i] > S:
-            cx, cy, sh = 0.0, cy + sh, 0.0
-        x[i], y[i] = cx, cy
-        cx += w[i]
-        sh = max(sh, h[i])
-    return x, y, cy + sh
+def _loop_triangles(objs):
+    """Blender's own triangulation (concave n-gons), as global loop indices + face indices."""
+    tris, faces = [], []
+    loff = foff = 0
+    for o in objs:
+        me = o.data
+        me.calc_loop_triangles()
+        T = len(me.loop_triangles)
+        t = np.empty(T * 3, np.int64)
+        me.loop_triangles.foreach_get("loops", t)
+        f = np.empty(T, np.int64)
+        me.loop_triangles.foreach_get("polygon_index", f)
+        tris.append(t.reshape(T, 3) + loff)
+        faces.append(f + foff)
+        loff += len(me.loops)
+        foff += len(me.polygons)
+    return np.concatenate(tris), np.concatenate(faces)
 
 
 def _chart_uvs(objs, size, texels_per_m, cell):
     n, area, cen, tot, co = _group_mesh(objs)
-    chart, N, fol = _charts(n, area, cen, tot, co, cell, SMALL_TEXELS / texels_per_m ** 2)
-    C = len(N)
-    up = np.where(np.abs(N[:, 2:3]) < 0.9, [[0, 0, 1]], [[1, 0, 0]])
-    t = np.cross(up, N)
-    t /= np.linalg.norm(t, axis=1)[:, None]
-    bt = np.cross(N, t)
-    cl = chart[fol]
-    p = np.stack([(co * t[cl]).sum(1), (co * bt[cl]).sum(1)], 1)     # metres in the chart plane
-    # principal axis -> x, so that the box is tight
-    cnt = np.bincount(cl, minlength=C).astype(float)
-    mean = np.stack([np.bincount(cl, p[:, 0], C), np.bincount(cl, p[:, 1], C)], 1) / cnt[:, None]
-    q = p - mean[cl]
-    sxx, syy, sxy = (np.bincount(cl, q[:, 0] ** 2, C), np.bincount(cl, q[:, 1] ** 2, C),
-                     np.bincount(cl, q[:, 0] * q[:, 1], C))
-    ang = 0.5 * np.arctan2(2 * sxy, sxx - syy)[cl]
-    qr = np.stack([q[:, 0] * np.cos(ang) + q[:, 1] * np.sin(ang), -q[:, 0] * np.sin(ang) + q[:, 1] * np.cos(ang)], 1)
-
-    def box(v):
-        lo = np.full((C, 2), np.inf)
-        hi = np.full((C, 2), -np.inf)
-        np.minimum.at(lo, cl, v)
-        np.maximum.at(hi, cl, v)
-        return lo, hi
-
-    (lo0, hi0), (lo1, hi1) = box(q), box(qr)
-    pca = np.prod(hi1 - lo1, 1) < np.prod(hi0 - lo0, 1)                # square charts: PCA axis is arbitrary
-    q = np.where(pca[cl, None], qr, q)
-    lo, hi = np.where(pca[:, None], lo1, lo0), np.where(pca[:, None], hi1, hi0)
-    q -= lo[cl]
-    ext = hi - lo
-    lo_s, hi_s = 1e-3, 64.0                                            # bisect the density scale k
-    for _ in range(30):
-        k = math.sqrt(lo_s * hi_s)
-        w = ext[:, 0] * texels_per_m * k + MARGIN_PX
-        h = ext[:, 1] * texels_per_m * k + MARGIN_PX
-        if w.max() <= size and _shelf(w, h, size)[2] <= size:
-            lo_s = k
-        else:
-            hi_s = k
-    k = lo_s
-    w = ext[:, 0] * texels_per_m * k + MARGIN_PX
-    h = ext[:, 1] * texels_per_m * k + MARGIN_PX
-    x, y, _ = _shelf(w, h, size)
-    uv = (q * texels_per_m * k + np.stack([x, y], 1)[cl] + MARGIN_PX / 2) / size
+    tris = _loop_triangles(objs)
+    uv, stats = uvpack.chart_uvs(n, area, cen, tot, co, size, texels_per_m, cell, tris=tris)
     off = 0
     for o in objs:
         L = len(o.data.loops)
         o.data.uv_layers["LightmapUV"].data.foreach_set("uv", uv[off:off + L].astype(np.float32).ravel())
         off += L
-    return {"charts": int(C), "density_scale": round(k, 3),
-            "fill": round(float((ext[:, 0] * ext[:, 1]).sum() * (texels_per_m * k) ** 2 / size ** 2), 3)}
+    # post-pack check on what the mesh (and so the glb) actually holds: float32 UVs
+    stored = []
+    for o in objs:
+        d = o.data.uv_layers["LightmapUV"].data
+        a = np.empty(len(d) * 2, np.float32)
+        d.foreach_get("uv", a)
+        stored.append(a.reshape(-1, 2))
+    over, covered, _ = uvpack.overlap(np.concatenate(stored).astype(np.float64), tris[0], size)
+    stats.update(stored_overlap_texels=over, covered_texels=covered)
+    return stats
 
 
 def _sphere_dirs(k):
@@ -216,6 +115,8 @@ def orient_faces(objs, everyone, rays=8, reach=200.0):
     flipped = 0
     for o in objs:
         me = o.data
+        if me.get("lm_oriented"):                                      # once per WebExport build:
+            continue                                                   # ambiguous faces would toggle
         flip = []
         for p in me.polygons:
             n = p.normal
@@ -237,6 +138,7 @@ def orient_faces(objs, everyone, rays=8, reach=200.0):
             bm.to_mesh(me)
             bm.free()
             flipped += len(flip)
+        me["lm_oriented"] = True
     return flipped
 
 
@@ -244,6 +146,7 @@ ORIENT_GROUPS = ("bowl", "structure")
 
 
 CHART_STATS = {}
+CLIP = {}                        # state -> group -> % of lit texels above rgbm.RANGE
 
 
 def lightmap_uvs(objs_by_group, scale=1.0):
@@ -256,9 +159,19 @@ def lightmap_uvs(objs_by_group, scale=1.0):
         kw = {"hi": ATLAS_HI[g]} if g in ATLAS_HI else {}
         tpm = groups.TEXELS_PER_M[g] * scale
         size = texel.atlas_size(_area(objs), tpm, **kw)
-        CHART_STATS[g] = _chart_uvs(objs, size, tpm, CELL_M.get(g, 16.0))
+        st = CHART_STATS[g] = _chart_uvs(objs, size, tpm, CELL_M.get(g, 16.0))
+        print(f"lightmap_uvs {g}: {size}px, {st['charts']} charts, overlap texels "
+              f"{st['stored_overlap_texels']}/{st['covered_texels']} (rounds {st['overlap_rounds']})")
+        if st["stored_overlap_texels"] > OVERLAP_TOLERANCE * st["covered_texels"]:
+            raise RuntimeError(f"lightmap UVs of {g} overlap: {st['stored_overlap_texels']} texels")
         sizes[g] = size
     return sizes
+
+
+# Area-weighted LED coverage of M_SailSkin (web LED_GLSL / shell._skin_material): dot area
+# pi 0.055^2 / 1.1^2 = 0.79 %, lit cells mean(1 - fade(z)) = 0.164 over the skin, brightness 1.05.
+# A uniform strength of 40 n (the first draft) lit the sails ~740x too bright (7-10 % RGBM clip).
+SAIL_LED_COVERAGE = 0.00135
 
 
 def _bake_material(src_mat, n):
@@ -277,7 +190,10 @@ def _bake_material(src_mat, n):
     e = info["emission"]
     if e:
         em.inputs["Color"].default_value = (*e["color"], 1)
-        em.inputs["Strength"].default_value = e["day"] + n * (e["night"] - e["day"]) if not e["baked"] else 0.0
+        strength = e["day"] + n * (e["night"] - e["day"]) if not e["baked"] else 0.0
+        if info["special"] == "sailLeds":
+            strength *= SAIL_LED_COVERAGE          # the LEDs are sparse dots, not a glowing skin
+        em.inputs["Strength"].default_value = strength
     else:
         em.inputs["Strength"].default_value = 0.0
     nt.links.new(dif.outputs[0], add.inputs[0])
@@ -295,37 +211,49 @@ def bake_lightmap(group, objs, size, state, n, samples):
     targets = {o.name for o in objs}
     everyone = [o for o in bpy.data.scenes[webscene.WEB].objects if o.get("webexport")]
     keep = {}
-    for o in everyone:
-        keep[o.name] = o.data.materials[0]
-        bm = _bake_material(bpy.data.materials[o["srcMat"]], n)
-        if o.name in targets:
-            node = bm.node_tree.nodes.new("ShaderNodeTexImage")
-            node.image = img
-            bm.node_tree.nodes.active = node
-            o.data.uv_layers.active = o.data.uv_layers["LightmapUV"]
-        o.data.materials[0] = bm
-    webscene.enter()
+    for o in everyone:                                                 # originals first, never a stand-in
+        m = o.data.materials[0]
+        if m is None or m.name.startswith("_bake_"):
+            m = bpy.data.materials.get(o["srcMat"] + ".web")
+            if m is None:
+                raise RuntimeError(f"{o.name}: no .web material to restore")
+        keep[o.name] = m
     try:
-        sc = bpy.context.scene
-        sc.cycles.samples = samples
-        sc.render.bake.margin = 8
-        sc.render.bake.margin_type = "EXTEND"
-        for o in sc.objects:
-            o.select_set(False)
-        for o in objs:
-            o.select_set(True)
-        bpy.context.view_layer.objects.active = objs[0]
-        bpy.ops.object.bake(type="DIFFUSE", pass_filter={"DIRECT", "INDIRECT"}, use_clear=True)
+        for o in everyone:
+            bm = _bake_material(bpy.data.materials[o["srcMat"]], n)
+            if o.name in targets:
+                node = bm.node_tree.nodes.new("ShaderNodeTexImage")
+                node.image = img
+                bm.node_tree.nodes.active = node
+                o.data.uv_layers.active = o.data.uv_layers["LightmapUV"]
+            o.data.materials[0] = bm
+        webscene.enter()
+        try:
+            sc = bpy.context.scene
+            sc.cycles.samples = samples
+            sc.render.bake.margin = 8                                      # fills empty texels only
+            sc.render.bake.margin_type = "EXTEND"
+            for o in sc.objects:
+                o.select_set(False)
+            for o in objs:
+                o.select_set(True)
+            bpy.context.view_layer.objects.active = objs[0]
+            bpy.ops.object.bake(type="DIFFUSE", pass_filter={"DIRECT", "INDIRECT"}, use_clear=True)
+        finally:
+            webscene.leave()
     finally:
-        webscene.leave()
         for o in everyone:
             tmp = o.data.materials[0]
             o.data.materials[0] = keep[o.name]
             o.data.uv_layers.active = o.data.uv_layers["UVMap"]
-            bpy.data.materials.remove(tmp)
+            if tmp is not None and tmp.name.startswith("_bake_"):
+                bpy.data.materials.remove(tmp)
     buf = np.empty(size * size * 4, np.float32)
     img.pixels.foreach_get(buf)
-    enc = rgbm.encode(buf.reshape(size, size, 4)[..., :3])
+    rgb = buf.reshape(size, size, 4)[..., :3]
+    lit = rgb.max(-1) > 1e-4
+    CLIP.setdefault(state, {})[group] = round(float((rgb.max(-1) > rgbm.RANGE)[lit].mean()) * 100, 2) if lit.any() else 0.0
+    enc = rgbm.encode(rgb)
     return _save_png(enc, os.path.join(RAW, "lightmaps", state, f"{group}.png"), non_color=True)
 
 

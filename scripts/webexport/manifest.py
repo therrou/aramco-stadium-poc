@@ -2,6 +2,8 @@
 import json
 import os
 
+from . import rgbm
+
 STATES = {"day": 0.0, "golden": 0.6, "night": 1.0}
 EXPOSURE = {"day": 0.25, "golden": 0.55, "night": 0.75}   # lighting._render_settings: 0.25 + 0.5 n
 
@@ -9,7 +11,7 @@ EXPOSURE = {"day": 0.25, "golden": 0.55, "night": 0.75}   # lighting._render_set
 def new():
     return {
         "version": 1,
-        "rgbmRange": 8.0,
+        "rgbmRange": rgbm.RANGE,
         "stadium": "stadium.glb",
         "trees": None,
         "seats": "seats.bin",

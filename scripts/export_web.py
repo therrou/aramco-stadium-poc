@@ -24,7 +24,7 @@ SOURCE_SCENE = "Scene"
 def _reload():
     import webexport
     for name in ("seatbin", "texel", "rgbm", "budget", "groups", "manifest", "hemioct",
-                 "matinfo", "webscene", "gltfout", "bake", "trees"):
+                 "matinfo", "webscene", "gltfout", "uvpack", "bake", "trees"):
         try:
             importlib.reload(importlib.import_module(f"webexport.{name}"))
         except ModuleNotFoundError:
@@ -88,7 +88,7 @@ def stage_geometry(report, quality):
 
 def stage_bake(report, quality, only_states=None, only_groups=None):
     """UVs once, then (group x state) lightmaps, then env maps; re-exports stadium.glb with UVs."""
-    from webexport import bake, gltfout, manifest, webscene
+    from webexport import bake, gltfout, manifest, rgbm, webscene
     q = bake.QUALITY[quality]
     web = bpy.data.scenes[webscene.WEB]
     objs = [o for o in web.objects if o.get("webexport")]
@@ -103,7 +103,8 @@ def stage_bake(report, quality, only_states=None, only_groups=None):
             web["lm_quality"] = quality
             gltfout.export_glb(objs, os.path.join(RAW, "stadium.glb"))    # now with real LightmapUVs
         report["atlas"] = json.loads(web["lm_atlas"])
-        patch = {"states": {}}
+        report["uv"] = {g: v for g, v in bake.CHART_STATS.items() if g != "flipped"}
+        patch = {"states": {}, "rgbmRange": rgbm.RANGE}          # the encoding these PNGs use
         for state, n in manifest.STATES.items():
             if only_states and state not in only_states:
                 continue
@@ -116,6 +117,7 @@ def stage_bake(report, quality, only_states=None, only_groups=None):
             env = bake.bake_env(state, n)
             report.setdefault("sun_error_deg", {})[state] = round(bake.sun_check(env, n), 1) if n < 1 else None
             patch["states"][state] = {"lightmaps": lm, "env": os.path.relpath(env, RAW)}
+            report.setdefault("clip_pct", {})[state] = dict(bake.CLIP.get(state, {}))
         manifest.merge(os.path.join(RAW, "manifest.json"), patch)
     finally:
         webscene.set_state(night0)                  # the render scene ends as it started

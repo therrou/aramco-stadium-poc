@@ -1,4 +1,5 @@
 # large / binary / third-party
+tools/
 blender/*.blend
 blender/*.blend1
 renders/

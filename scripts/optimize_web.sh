@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# build/web_raw -> web/public/assets  (spec §2). Needs node and KTX-Software `ktx` >= 4.3.
+#
+# KTX-Software setup (no sudo, per controller ruling R3):
+#   gh release download v4.4.2 -R KhronosGroup/KTX-Software \
+#     --pattern 'KTX-Software-4.4.2-Darwin-arm64.pkg' -D /private/tmp/ktx --clobber
+#   pkgutil --expand-full /private/tmp/ktx/KTX-Software-4.4.2-Darwin-arm64.pkg /private/tmp/ktx/expanded
+#   mkdir -p tools/ktx/bin tools/ktx/lib
+#   cp -R /private/tmp/ktx/expanded/KTX-Software-4.4.2-Darwin-arm64-tools.pkg/Payload/usr/local/bin/. tools/ktx/bin/
+#   cp -R /private/tmp/ktx/expanded/KTX-Software-4.4.2-Darwin-arm64-library.pkg/Payload/usr/local/lib/. tools/ktx/lib/
+# The `ktx` binary's LC_RPATH is @executable_path/../lib, so keeping bin/ and lib/
+# side by side under tools/ktx/ is enough for it to find libktx without
+# DYLD_LIBRARY_PATH. `tools/` is gitignored; this setup is local to each machine.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+export PATH="$(pwd)/tools/ktx/bin:$PATH"
+RAW=build/web_raw
+OUT=web/public/assets
+GT="npx --yes @gltf-transform/cli@4.5.0"
+rm -rf "$OUT" && mkdir -p "$OUT"
+
+opt_glb () {   # $1 in, $2 out
+  local tmp; tmp=$(mktemp -d)
+  $GT dedup "$1" "$tmp/a.glb"
+  $GT instance "$tmp/a.glb" "$tmp/b.glb" --min 5        # trees: repeated nodes -> EXT_mesh_gpu_instancing
+  $GT prune "$tmp/b.glb" "$tmp/c.glb" --keep-attributes        # keep TEXCOORD_1 (lightmap UVs, unused until Tasks 10/12)
+  $GT weld "$tmp/c.glb" "$tmp/d.glb"
+  $GT resize "$tmp/d.glb" "$tmp/e.glb" --width 2048 --height 2048
+  $GT etc1s "$tmp/e.glb" "$tmp/f.glb" --slots '@(baseColorTexture|emissiveTexture)'
+  $GT uastc "$tmp/f.glb" "$tmp/g.glb" --slots "normalTexture" --level 2 --zstd 18
+  $GT meshopt "$tmp/g.glb" "$2"
+  rm -rf "$tmp"
+}
+
+opt_glb "$RAW/stadium.glb" "$OUT/stadium.glb"
+[ -f "$RAW/trees.glb" ] && opt_glb "$RAW/trees.glb" "$OUT/trees.glb"
+cp "$RAW/seats.bin" "$RAW/sections.json" "$RAW/cameras.json" "$OUT/"
+
+# lightmaps and impostor atlases: PNG -> KTX2. Lightmaps are RGBM (linear), capped at 4096.
+find "$RAW" \( -path "*/lightmaps/*.png" -o -path "*/impostors/*.png" \) | while read -r png; do
+  rel=${png#"$RAW/"}; dst="$OUT/${rel%.png}.ktx2"; mkdir -p "$(dirname "$dst")"
+  case "$rel" in
+    lightmaps/*) ktx create --format R8G8B8A8_UNORM --assign-tf linear --encode uastc --uastc-quality 2 --zstd 18 "$png" "$dst" ;;
+    impostors/*) ktx create --format R8G8B8A8_SRGB --encode uastc --uastc-quality 2 --zstd 18 --generate-mipmap "$png" "$dst" ;;
+  esac
+done
+if [ -d "$RAW/env" ]; then mkdir -p "$OUT/env" && cp "$RAW"/env/*.hdr "$OUT/env/"; fi
+
+# manifest: point lightmaps/impostors at .ktx2
+node -e '
+const fs=require("fs");const m=JSON.parse(fs.readFileSync(process.argv[1]));
+const k=p=>p&&p.replace(/\.png$/,".ktx2");
+for(const s of Object.values(m.states)) for(const g in s.lightmaps) s.lightmaps[g]=k(s.lightmaps[g]);
+if(m.trees&&m.trees.impostors) for(const i of Object.values(m.trees.impostors)) i.atlas=k(i.atlas);
+fs.writeFileSync(process.argv[2],JSON.stringify(m,null,1));' "$RAW/manifest.json" "$OUT/manifest.json"
+
+PYTHONPATH=scripts .venv/bin/python -m webexport.sizecheck "$OUT" --limit 35

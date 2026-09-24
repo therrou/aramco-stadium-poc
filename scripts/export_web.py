@@ -65,7 +65,28 @@ def stage_data(report):
     report.update(seats=len(rows), sections=len(sections), seats_bin_bytes=len(blob))
 
 
-STAGES = {"data": stage_data}
+def stage_geometry(report, quality):
+    from webexport import budget, gltfout, manifest, matinfo, webscene
+    objs = webscene.build()
+    mats = {}
+    for o in objs:
+        info = matinfo.classify(bpy.data.materials[o["srcMat"]])
+        if info["kind"] == "tiled" and info["tile"]:
+            webscene.planar_uv(o, info["tile"])
+        mats[o.name] = gltfout.web_material(info, {})
+        o.data.materials[0] = mats[o.name]
+    tris = webscene.triangles(objs)
+    path = os.path.join(RAW, "stadium.glb")
+    gltfout.export_glb(objs, path)
+    report.update(objects=len(objs), static_triangles=tris,
+                  stadium_glb_mb=round(os.path.getsize(path) / 2**20, 2))
+    fails = budget.check({"triangles": tris + budget.TREE_TRI_BUDGET + budget.SEAT_TRI_BUDGET})
+    report["budget_failures"] = fails
+    manifest.merge(os.path.join(RAW, "manifest.json"), {"stadium": "stadium.glb"})
+    assert not fails, fails
+
+
+STAGES = {"data": stage_data, "geometry": stage_geometry}
 
 
 def run(stages=("data", "geometry", "bake", "trees"), quality="draft"):

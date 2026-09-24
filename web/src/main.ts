@@ -4,7 +4,11 @@ import { missingCapabilities, probe } from "./capabilities";
 import { AssetError, assetJobs, collect, fetchManifest, makeLoaders, runJobs, type Assets } from "./loader";
 import { Perf, exposeViewerHooks } from "./perf";
 import { hideOverlay, showError, showFatal, showProgress } from "./ui";
-import { toThree } from "./coords";
+import { toThree, toBlender } from "./coords";
+import { parseSeats, indexSections } from "./seatsData";
+import { mockAvailability } from "./availability";
+import { SeatField, visibleSections, SEAT_LOD_DIST } from "./seats";
+import { SectionPatches } from "./sectionPatches";
 
 const params = new URLSearchParams(location.search);
 
@@ -34,6 +38,11 @@ async function boot() {
 function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const scene = new THREE.Scene();
   scene.add(a.stadium.scene);
+  const table = parseSeats(a.seatsBin), idx = indexSections(table);
+  const avail = mockAvailability(table, idx);
+  const seats = new SeatField(table, idx, a.sections.sections, avail);
+  const patches = new SectionPatches(table, idx, avail);
+  scene.add(seats.mesh, patches.mesh);
   const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 8000);
   const cam = a.cameras["CAM_Aerial_SW"];
   camera.position.copy(toThree(cam.eye));
@@ -60,6 +69,9 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     perf.begin();
     renderer.info.reset();
     controls.update();
+    const vis = visibleSections(toBlender(camera.position), a.sections.sections, SEAT_LOD_DIST);
+    seats.setVisibleSections(vis);
+    patches.setHidden(vis);
     renderer.render(scene, camera);
     perf.end();
   });

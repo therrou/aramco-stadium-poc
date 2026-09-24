@@ -86,7 +86,42 @@ def stage_geometry(report, quality):
     assert not fails, fails
 
 
-STAGES = {"data": stage_data, "geometry": stage_geometry}
+def stage_bake(report, quality, only_states=None, only_groups=None):
+    """UVs once, then (group x state) lightmaps, then env maps; re-exports stadium.glb with UVs."""
+    from webexport import bake, gltfout, manifest, webscene
+    q = bake.QUALITY[quality]
+    web = bpy.data.scenes[webscene.WEB]
+    objs = [o for o in web.objects if o.get("webexport")]
+    by = {}
+    for o in objs:
+        by.setdefault(o["lightmap"], []).append(o)
+    night0 = bpy.data.scenes[SOURCE_SCENE].get("night", 0.0)
+    try:
+        # UVs persist on the scene: every MCP call is a fresh namespace, and all states must share one UV layout
+        if web.get("lm_quality") != quality:
+            web["lm_atlas"] = json.dumps(bake.lightmap_uvs(by, q["scale"]))
+            web["lm_quality"] = quality
+            gltfout.export_glb(objs, os.path.join(RAW, "stadium.glb"))    # now with real LightmapUVs
+        report["atlas"] = json.loads(web["lm_atlas"])
+        patch = {"states": {}}
+        for state, n in manifest.STATES.items():
+            if only_states and state not in only_states:
+                continue
+            lm = {}
+            for g, gobjs in by.items():
+                if only_groups and g not in only_groups:
+                    continue
+                p = bake.bake_lightmap(g, gobjs, report["atlas"][g], state, n, q["samples"])
+                lm[g] = os.path.relpath(p, RAW)
+            env = bake.bake_env(state, n)
+            report.setdefault("sun_error_deg", {})[state] = round(bake.sun_check(env, n), 1) if n < 1 else None
+            patch["states"][state] = {"lightmaps": lm, "env": os.path.relpath(env, RAW)}
+        manifest.merge(os.path.join(RAW, "manifest.json"), patch)
+    finally:
+        webscene.set_state(night0)                  # the render scene ends as it started
+
+
+STAGES = {"data": stage_data, "geometry": stage_geometry, "bake": stage_bake}
 
 
 def run(stages=("data", "geometry", "bake", "trees"), quality="draft"):

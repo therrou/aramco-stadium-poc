@@ -3,7 +3,7 @@ GROUP_OF_COLLECTION = {"Pitch": "pitch", "Bowl": "bowl", "Shell": "structure", "
 SAIL_MATERIALS = {"M_SailSkin", "M_SailUnder"}
 EXCLUDE_PREFIXES = ("Seats_", "SeatModel", "Trees_", "Crowd_", "Haze_", "Sign_Path")
 # lightmap texels per metre (spec: ~4 on the stadium, ~1 on the site)
-TEXELS_PER_M = {"pitch": 4.0, "bowl": 4.0, "sails": 4.0, "structure": 4.0, "site": 1.0}
+TEXELS_PER_M = {"pitch": 4.0, "bowl": 4.0, "sails": 4.0, "structure": 4.0, "site": 0.6}   # site 0.6: size-budget knob (Task 10)
 # albedo/emission bake density for procedural materials
 ALBEDO_TEXELS_PER_M = {"pitch": 16.0, "bowl": 4.0, "sails": 2.0, "structure": 4.0, "site": 1.0}
 

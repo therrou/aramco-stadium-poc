@@ -2,14 +2,17 @@ import * as THREE from "three";
 import { missingCapabilities, probe } from "./capabilities";
 import { AssetError, assetJobs, collect, fetchManifest, makeLoaders, runJobs, type Assets } from "./loader";
 import { Perf, exposeViewerHooks } from "./perf";
-import { hideOverlay, showError, showFatal, showProgress } from "./ui";
+import { hideOverlay, showError, showFatal, showProgress, renderPanel } from "./ui";
 import { toBlender } from "./coords";
 import { parseSeats, indexSections } from "./seatsData";
 import { mockAvailability } from "./availability";
 import { SeatField, visibleSections, SEAT_LOD_DIST } from "./seats";
 import { SectionPatches } from "./sectionPatches";
 import { CameraRig } from "./camera";
-import { cameraPose, type Pose } from "./flyto";
+import { cameraPose, sectionFraming, type Pose } from "./flyto";
+import { onClick } from "./picking";
+import { reduce, initialState, type Action } from "./state";
+import type { State } from "./loader";
 
 const params = new URLSearchParams(location.search);
 
@@ -64,12 +67,47 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   resize();
   renderer.info.autoReset = false;
   exposeViewerHooks({ get fps() { return perf.fps; }, info: renderer.info, flyTo: (p: Pose) => rig.flyTo(p) });
+
+  let app = initialState;
+  let lightingChanged: ((l: State) => void) | undefined;   // set in Task 9
+  const secById = new Map(a.sections.sections.map((s) => [Number(s.id), s]));
+  const ray = new THREE.Raycaster();
+  const dispatch = (act: Action) => {
+    const prev = app;
+    app = reduce(app, act);
+    if (app === prev) return;
+    if (act.type === "section" && app.view.kind === "section") rig.flyTo(sectionFraming(secById.get(app.view.section)!));
+    if (act.type === "back") rig.flyTo(overview);
+    if (act.type === "lighting") lightingChanged?.(app.lighting);
+    draw();
+  };
+  const draw = () => {
+    const v = app.view, sec = v.kind === "section" ? secById.get(v.section) : undefined;
+    let available = 0, total = 0;
+    if (v.kind === "section") {
+      const { start, end } = idx.get(v.section)!;
+      total = end - start;
+      for (let i = start; i < end; i++) available += avail[i] === 0 ? 1 : 0;
+    }
+    renderPanel(app, { sectionLabel: sec?.id, tier: sec?.tier, available, total }, {
+      lighting: (l) => dispatch({ type: "lighting", lighting: l }),
+      back: () => dispatch({ type: "back" }),
+    });
+  };
+  onClick(renderer.domElement, (ndc) => {
+    ray.setFromCamera(ndc, rig.camera);
+    const hit = ray.intersectObject(patches.mesh, false)[0];
+    dispatch(hit ? { type: "section", section: patches.sectionOfFace(hit.faceIndex!) } : { type: "none" });
+  });
+  addEventListener("keydown", (e) => e.key === "Escape" && dispatch({ type: "back" }));
+  draw();
+
   const clock = new THREE.Clock();
   renderer.setAnimationLoop(() => {
     perf.begin();
     renderer.info.reset();
     rig.update(clock.getDelta());
-    const vis = visibleSections(toBlender(camera.position), a.sections.sections, SEAT_LOD_DIST);
+    const vis = visibleSections(toBlender(camera.position), a.sections.sections, SEAT_LOD_DIST, app.view.kind === "section" ? app.view.section : -1);
     seats.setVisibleSections(vis);
     patches.setHidden(vis);
     renderer.render(scene, camera);

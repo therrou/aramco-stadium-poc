@@ -11,21 +11,43 @@
 # The `ktx` binary's LC_RPATH is @executable_path/../lib, so keeping bin/ and lib/
 # side by side under tools/ktx/ is enough for it to find libktx without
 # DYLD_LIBRARY_PATH. `tools/` is gitignored; this setup is local to each machine.
+# Per-slot texture size caps (controller ruling R4): gltf-transform's CLI
+# `resize` command only matches textures by name/URI (--pattern), not by the
+# material slot that uses them, so per-slot caps go through
+# scripts/webexport/resize_slots.cjs, which calls @gltf-transform/functions'
+# `textureCompress({slots, resize})` directly (same pinned 4.5.0 version,
+# fetched via `npx -p @gltf-transform/core@4.5.0 -p .../functions@4.5.0
+# -p .../extensions@4.5.0 -- node ...`). targetFormat is left unset there, so
+# only pixel dimensions change; ETC1S/UASTC encoding still happens below.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$(pwd)/tools/ktx/bin:$PATH"
 RAW=build/web_raw
 OUT=web/public/assets
 GT="npx --yes @gltf-transform/cli@4.5.0"
+GTJS="npx --yes -p @gltf-transform/core@4.5.0 -p @gltf-transform/functions@4.5.0 -p @gltf-transform/extensions@4.5.0 -- node scripts/webexport/resize_slots.cjs"
 rm -rf "$OUT" && mkdir -p "$OUT"
+
+# Track every opt_glb tmp dir so a failure mid-pipeline (set -e) still cleans
+# up instead of leaking mktemp dirs.
+TMP_DIRS=()
+cleanup() {
+  local d
+  for d in "${TMP_DIRS[@]:-}"; do
+    [ -n "$d" ] && rm -rf "$d"
+  done
+}
+trap cleanup EXIT
 
 opt_glb () {   # $1 in, $2 out
   local tmp; tmp=$(mktemp -d)
+  TMP_DIRS+=("$tmp")
   $GT dedup "$1" "$tmp/a.glb"
   $GT instance "$tmp/a.glb" "$tmp/b.glb" --min 5        # trees: repeated nodes -> EXT_mesh_gpu_instancing
   $GT prune "$tmp/b.glb" "$tmp/c.glb" --keep-attributes        # keep TEXCOORD_1 (lightmap UVs, unused until Tasks 10/12)
   $GT weld "$tmp/c.glb" "$tmp/d.glb"
-  $GT resize "$tmp/d.glb" "$tmp/e.glb" --width 2048 --height 2048
+  $GT resize "$tmp/d.glb" "$tmp/e0.glb" --width 2048 --height 2048     # global cap; emissiveTexture (baked later, Task 11) stays here
+  $GTJS "$tmp/e0.glb" "$tmp/e.glb" normalTexture=512 baseColorTexture=1024
   $GT etc1s "$tmp/e.glb" "$tmp/f.glb" --slots '@(baseColorTexture|emissiveTexture)'
   $GT uastc "$tmp/f.glb" "$tmp/g.glb" --slots "normalTexture" --level 2 --zstd 18
   $GT meshopt "$tmp/g.glb" "$2"
@@ -44,7 +66,13 @@ find "$RAW" \( -path "*/lightmaps/*.png" -o -path "*/impostors/*.png" \) | while
     impostors/*) ktx create --format R8G8B8A8_SRGB --encode uastc --uastc-quality 2 --zstd 18 --generate-mipmap "$png" "$dst" ;;
   esac
 done
-if [ -d "$RAW/env" ]; then mkdir -p "$OUT/env" && cp "$RAW"/env/*.hdr "$OUT/env/"; fi
+if [ -d "$RAW/env" ]; then
+  mkdir -p "$OUT/env"
+  shopt -s nullglob
+  hdrs=("$RAW"/env/*.hdr)
+  shopt -u nullglob
+  if [ ${#hdrs[@]} -gt 0 ]; then cp "${hdrs[@]}" "$OUT/env/"; fi
+fi
 
 # manifest: point lightmaps/impostors at .ktx2
 node -e '

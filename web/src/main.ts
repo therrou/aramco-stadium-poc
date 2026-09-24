@@ -1,14 +1,15 @@
 import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { missingCapabilities, probe } from "./capabilities";
 import { AssetError, assetJobs, collect, fetchManifest, makeLoaders, runJobs, type Assets } from "./loader";
 import { Perf, exposeViewerHooks } from "./perf";
 import { hideOverlay, showError, showFatal, showProgress } from "./ui";
-import { toThree, toBlender } from "./coords";
+import { toBlender } from "./coords";
 import { parseSeats, indexSections } from "./seatsData";
 import { mockAvailability } from "./availability";
 import { SeatField, visibleSections, SEAT_LOD_DIST } from "./seats";
 import { SectionPatches } from "./sectionPatches";
+import { CameraRig } from "./camera";
+import { cameraPose, type Pose } from "./flyto";
 
 const params = new URLSearchParams(location.search);
 
@@ -43,12 +44,11 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const seats = new SeatField(table, idx, a.sections.sections, avail);
   const patches = new SectionPatches(table, idx, avail);
   scene.add(seats.mesh, patches.mesh);
-  const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 8000);
-  const cam = a.cameras["CAM_Aerial_SW"];
-  camera.position.copy(toThree(cam.eye));
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.copy(toThree(cam.target));
-  controls.enableDamping = true;
+  const rig = new CameraRig(renderer.domElement);
+  const overview = cameraPose(a.cameras["CAM_Aerial_SW"]);
+  const camParam = params.get("cam");
+  rig.jump(camParam && a.cameras[camParam] ? cameraPose(a.cameras[camParam]) : overview);
+  const camera = rig.camera;
   // fallback lighting until lightmaps exist (Review Focus 4); lighting.ts replaces this in Task 9
   scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x6b5a40, 1.2));
   const sun = new THREE.DirectionalLight(0xfff0dd, 2.5);
@@ -58,17 +58,17 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const resize = () => {
     const [w, h] = (params.get("size") ?? `${innerWidth}x${innerHeight}`).split("x").map(Number);
     renderer.setSize(w, h, false);
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
+    rig.resize(w, h);
   };
   addEventListener("resize", resize);
   resize();
   renderer.info.autoReset = false;
-  exposeViewerHooks({ get fps() { return perf.fps; }, info: renderer.info });
+  exposeViewerHooks({ get fps() { return perf.fps; }, info: renderer.info, flyTo: (p: Pose) => rig.flyTo(p) });
+  const clock = new THREE.Clock();
   renderer.setAnimationLoop(() => {
     perf.begin();
     renderer.info.reset();
-    controls.update();
+    rig.update(clock.getDelta());
     const vis = visibleSections(toBlender(camera.position), a.sections.sections, SEAT_LOD_DIST);
     seats.setVisibleSections(vis);
     patches.setHidden(vis);

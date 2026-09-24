@@ -6,7 +6,7 @@ import type { SeatTable } from "./seatsData";
 import type { Avail } from "./availability";
 
 export const SEAT_COLORS = { available: 0x2fbf71, taken: 0x6b6f76, club: 0xefe3c8 } as const;
-export const SEAT_LOD_DIST = 90;   // m from camera to section centroid; the worst case is pinned in flyto.test.ts (Task 7)
+export const SEAT_LOD_DIST = 80;   // m from camera to section centroid; the worst case is pinned in flyto.test.ts (Task 7). Lowered from 90 -> 80 (worst-case 30,379 -> 20,098 seats) to satisfy decision D6 (<=25k).
 const CLUB_WIDTH = 0.58 / 0.5;     // params.CLUB.seat_w / LOWER.seat_w
 
 /** Low-poly seat, two boxes (pan + back), 24 tris. Front faces +X; origin at the tread. */

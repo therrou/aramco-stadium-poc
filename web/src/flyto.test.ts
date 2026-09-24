@@ -1,0 +1,47 @@
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { sectionFraming, verticalFov, pathPoint } from "./flyto";
+import { visibleSections, SEAT_LOD_DIST } from "./seats";
+import type { SectionsDoc } from "./loader";
+
+const doc: SectionsDoc = JSON.parse(readFileSync(new URL("../../data/sections.json", import.meta.url), "utf8"));
+
+describe("fov (Review Focus 3)", () => {
+  it("Blender AUTO fit: hfov applies to the larger side", () => {
+    expect(verticalFov(62, 16 / 9)).toBeCloseTo(37.35, 2);
+    expect(verticalFov(62, 9 / 16)).toBeCloseTo(62, 6);     // portrait: the larger side is vertical
+    expect(verticalFov(62, 1)).toBeCloseTo(62, 6);
+  });
+});
+
+describe("section framing (decision D3: zoom to the area)", () => {
+  it("looks at the section from inside the bowl, above it", () => {
+    for (const s of doc.sections) {
+      const f = sectionFraming(s);
+      expect(Math.hypot(f.eye[0], f.eye[1])).toBeLessThan(Math.hypot(s.centroid[0], s.centroid[1]));
+      expect(f.eye[2]).toBeGreaterThan(s.centroid[2]);
+      expect(f.target).toEqual(s.centroid);
+    }
+  });
+  it("worst-case visible seats from any section framing stays <= 25k (decision D6)", () => {
+    let worst = 0;
+    for (const s of doc.sections) {
+      const ids = visibleSections(sectionFraming(s).eye, doc.sections, SEAT_LOD_DIST, Number(s.id));
+      worst = Math.max(worst, doc.sections.filter((x) => ids.has(Number(x.id))).reduce((a, x) => a + x.seats, 0));
+    }
+    expect(worst).toBeLessThanOrEqual(25_000);
+  });
+});
+
+describe("flight path", () => {
+  it("aerial -> inside the bowl dives through the oculus, not the roof", () => {
+    const from: [number, number, number] = [-330, -470, 230], to: [number, number, number] = [0, -20, 35];
+    for (let i = 0; i <= 50; i++) {
+      const [x, y, z] = pathPoint(from, to, i / 50);
+      if (z < 58) expect(Math.hypot(x / 76, y / 63)).toBeLessThan(1.0);  // below the rim => inside the oculus
+    }
+  });
+  it("inside -> inside is a straight line", () => {
+    expect(pathPoint([0, -20, 35], [10, -50, 8], 0.5)).toEqual([5, -35, 21.5]);
+  });
+});

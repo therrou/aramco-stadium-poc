@@ -67,79 +67,57 @@ def roof_z_at(x, y):
 
 
 # --- materials -----------------------------------------------------------
+LED_FULL_Z = 36.0     # LED points at full density below this height (m)
+LED_FADE_Z = 50.0     # ... thinning out to none by here, clear of the oculus (key visuals)
+
+
 def _skin_material():
-    """Silver triangulated panels with scattered LED points (night only)."""
+    """Smooth pearl-silver metal skin, one uniform finish (key visuals show no
+    visible panel pattern). Night: LED points on the lower two thirds only."""
     mat = C.new_material("M_SailSkin")
     nt, b = mat.node_tree, C.bsdf_of(mat)
-    b.inputs["Metallic"].default_value = 0.82
-    uv = nt.nodes.new("ShaderNodeUVMap")
-    uv.location = (-1600, 0)
+    b.inputs["Base Color"].default_value = (0.86, 0.87, 0.89, 1)
+    b.inputs["Metallic"].default_value = 0.9
+    b.inputs["Coat Weight"].default_value = 0.35       # pearly clear-coat sheen
+    b.inputs["Coat Roughness"].default_value = 0.08
+    geo = nt.nodes.new("ShaderNodeNewGeometry")
     sep = nt.nodes.new("ShaderNodeSeparateXYZ")
-    sep.location = (-1400, 0)
-    nt.links.new(uv.outputs["UV"], sep.inputs[0])
-    size = 2.6
-    fu = C.math_node(nt, "FRACT", C.math_node(nt, "DIVIDE", sep.outputs["X"], size, x=-1200, y=100), x=-1000, y=100)
-    fv = C.math_node(nt, "FRACT", C.math_node(nt, "DIVIDE", sep.outputs["Y"], size, x=-1200, y=-100), x=-1000, y=-100)
-    w = 0.006
-    su = C.math_node(nt, "LESS_THAN", C.math_node(nt, "PINGPONG", fu, 0.5, x=-850, y=150), w, x=-700, y=150)
-    sv = C.math_node(nt, "LESS_THAN", C.math_node(nt, "PINGPONG", fv, 0.5, x=-850, y=0), w, x=-700, y=0)
-    diag = C.math_node(nt, "LESS_THAN",
-                       C.math_node(nt, "ABSOLUTE", C.math_node(nt, "SUBTRACT", fu, fv, x=-850, y=-150),
-                                   x=-700, y=-150), w * 1.2, x=-550, y=-150)
-    seam = C.math_node(nt, "MAXIMUM", C.math_node(nt, "MAXIMUM", su, sv, x=-550, y=100), diag, x=-400, y=50)
-    # per-panel tint
-    fl = nt.nodes.new("ShaderNodeCombineXYZ")
-    fl.location = (-1000, -350)
-    nt.links.new(C.math_node(nt, "FLOOR", C.math_node(nt, "DIVIDE", sep.outputs["X"], size), x=-1150, y=-300), fl.inputs[0])
-    nt.links.new(C.math_node(nt, "FLOOR", C.math_node(nt, "DIVIDE", sep.outputs["Y"], size), x=-1150, y=-400), fl.inputs[1])
-    tri = C.math_node(nt, "GREATER_THAN", fu, fv, x=-850, y=-450)
-    nt.links.new(tri, fl.inputs[2])
-    wn = nt.nodes.new("ShaderNodeTexWhiteNoise")
-    wn.noise_dimensions = "3D"
-    wn.location = (-800, -350)
-    nt.links.new(fl.outputs[0], wn.inputs["Vector"])
-    tint = nt.nodes.new("ShaderNodeMapRange")
-    tint.location = (-600, -350)
-    tint.inputs["To Min"].default_value = 0.66
-    tint.inputs["To Max"].default_value = 0.8
-    nt.links.new(wn.outputs["Value"], tint.inputs["Value"])
-    col = nt.nodes.new("ShaderNodeMix")
-    col.data_type = "RGBA"
-    col.location = (-250, 0)
-    nt.links.new(seam, col.inputs["Factor"])
-    comb = nt.nodes.new("ShaderNodeCombineColor")
-    comb.location = (-450, -300)
-    for i, k in enumerate((0.97, 0.99, 1.02)):
-        nt.links.new(C.math_node(nt, "MULTIPLY", tint.outputs[0], k, x=-500, y=-450 - 60 * i), comb.inputs[i])
-    nt.links.new(comb.outputs[0], col.inputs["A"])
-    col.inputs["B"].default_value = (0.42, 0.43, 0.45, 1)
-    nt.links.new(col.outputs["Result"], b.inputs["Base Color"])
-    rough = C.math_node(nt, "ADD", C.math_node(nt, "MULTIPLY", wn.outputs["Value"], 0.1), 0.17, x=-400, y=-600)
-    nt.links.new(rough, b.inputs["Roughness"])
-    # LED points: sparse random Voronoi cells
+    nt.links.new(geo.outputs["Position"], sep.inputs[0])
+    # large, soft roughness variation only (no per-panel tint)
+    noise = nt.nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Scale"].default_value = 0.02
+    noise.inputs["Detail"].default_value = 2
+    nt.links.new(geo.outputs["Position"], noise.inputs["Vector"])
+    rough = nt.nodes.new("ShaderNodeMapRange")
+    rough.inputs["To Min"].default_value = 0.2
+    rough.inputs["To Max"].default_value = 0.28
+    nt.links.new(noise.outputs["Fac"], rough.inputs["Value"])
+    nt.links.new(rough.outputs[0], b.inputs["Roughness"])
+
+    # LED points: sparse random Voronoi cells in UV (metres)
+    uv = nt.nodes.new("ShaderNodeUVMap")
     vor = nt.nodes.new("ShaderNodeTexVoronoi")
     vor.voronoi_dimensions = "2D"
-    vor.location = (-1000, 400)
     vor.inputs["Scale"].default_value = 1 / 1.1
     nt.links.new(uv.outputs["UV"], vor.inputs["Vector"])
-    dot = C.math_node(nt, "LESS_THAN", vor.outputs["Distance"], 0.035, x=-800, y=450)
+    dot = C.math_node(nt, "LESS_THAN", vor.outputs["Distance"], 0.05)
     sepc = nt.nodes.new("ShaderNodeSeparateColor")
-    sepc.location = (-800, 300)
     nt.links.new(vor.outputs["Color"], sepc.inputs[0])
-    pick = C.math_node(nt, "GREATER_THAN", sepc.outputs[0], 0.7, x=-650, y=300)
-    led = C.math_node(nt, "MULTIPLY", dot, pick, x=-500, y=400)
-    tw = C.math_node(nt, "ADD", C.math_node(nt, "MULTIPLY", sepc.outputs[1], 1.5), 0.3, x=-500, y=250)
-    led = C.math_node(nt, "MULTIPLY", led, tw, x=-350, y=400)
-    night = C.night_node(nt, x=-500, y=600)
-    strength = C.math_node(nt, "MULTIPLY", led, C.math_node(nt, "MULTIPLY", night, 40.0, x=-350, y=600), x=-200, y=500)
+    # density falls with height: cell survives if its random value beats the fade
+    fade = nt.nodes.new("ShaderNodeMapRange")
+    fade.inputs["From Min"].default_value = LED_FULL_Z
+    fade.inputs["From Max"].default_value = LED_FADE_Z
+    fade.inputs["To Min"].default_value = 0.55
+    fade.inputs["To Max"].default_value = 1.01
+    nt.links.new(sep.outputs["Z"], fade.inputs["Value"])
+    pick = C.math_node(nt, "GREATER_THAN", sepc.outputs[0], fade.outputs[0])
+    led = C.math_node(nt, "MULTIPLY", dot, pick)
+    tw = C.math_node(nt, "ADD", C.math_node(nt, "MULTIPLY", sepc.outputs[1], 1.5), 0.3)
+    led = C.math_node(nt, "MULTIPLY", led, tw)
+    strength = C.math_node(nt, "MULTIPLY", led, C.math_node(nt, "MULTIPLY", C.night_node(nt), 40.0))
     b.inputs["Emission Color"].default_value = (0.75, 0.92, 1.0, 1)
     nt.links.new(strength, b.inputs["Emission Strength"])
-    bump = nt.nodes.new("ShaderNodeBump")
-    bump.inputs["Strength"].default_value = 0.15
-    bump.inputs["Distance"].default_value = 0.01
-    nt.links.new(C.math_node(nt, "SUBTRACT", 1.0, seam, x=-250, y=-200), bump.inputs["Height"])
-    nt.links.new(bump.outputs["Normal"], b.inputs["Normal"])
-    mat.diffuse_color = (0.8, 0.81, 0.83, 1)
+    mat.diffuse_color = (0.86, 0.87, 0.89, 1)
     _add_translucency(mat, 0.35, (0.9, 0.93, 0.95))
     return mat
 

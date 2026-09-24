@@ -39,6 +39,16 @@ class STADIUM_OT_day(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class STADIUM_OT_golden(bpy.types.Operator):
+    bl_idname = "stadium.golden"
+    bl_label = "Golden hour"
+    bl_description = "Low warm sun with the stadium lights coming on (Dezeen hero look)"
+
+    def execute(self, context):
+        set_night(context, 0.6)
+        return {"FINISHED"}
+
+
 class STADIUM_OT_night(bpy.types.Operator):
     bl_idname = "stadium.night"
     bl_label = "Night"
@@ -82,10 +92,12 @@ class STADIUM_PT_panel(bpy.types.Panel):
             night = context.scene.get("night", 0.0)
             row = layout.row(align=True)
             row.scale_y = 1.4
-            row.operator("stadium.day", text="Day", icon=_icon("LIGHT_SUN"), depress=night < 0.5)
-            row.operator("stadium.night", text="Night", icon=_icon("LIGHT_POINT"), depress=night >= 0.5)
+            row.operator("stadium.day", text="Day", icon=_icon("LIGHT_SUN"), depress=night < 0.3)
+            row.operator("stadium.golden", text="Golden", icon=_icon("LIGHT_AREA"),
+                         depress=0.3 <= night < 0.8)
+            row.operator("stadium.night", text="Night", icon=_icon("LIGHT_POINT"), depress=night >= 0.8)
             if "night" in context.scene:
-                layout.prop(context.scene, '["night"]', text="Dusk blend", slider=True)
+                layout.prop(context.scene, '["night"]', text="Time of day", slider=True)
             box = layout.box()
             box.label(text="Viewport: Material Preview (fast)", icon=_icon("INFO"))
             box.label(text="or Rendered (Cycles, final)")
@@ -99,7 +111,7 @@ class STADIUM_PT_panel(bpy.types.Panel):
             traceback.print_exc()
 
 
-CLASSES = (STADIUM_OT_day, STADIUM_OT_night, STADIUM_OT_use_camera, STADIUM_PT_panel)
+CLASSES = (STADIUM_OT_day, STADIUM_OT_golden, STADIUM_OT_night, STADIUM_OT_use_camera, STADIUM_PT_panel)
 OLD = ("STADIUM_OT_set_time",)
 
 

@@ -16,6 +16,11 @@ SUN_ELEVATION = math.radians(24.0)
 SUN_AZIMUTH = math.radians(235.0)   # from +Y, clockwise (south-west sun)
 DUSK_ELEVATION = math.radians(0.8)
 DUSK_AZIMUTH = math.radians(290.0)  # sunset in the west-north-west
+GOLDEN = 0.6                         # slider value for golden hour (Dezeen hero look)
+# sun path driven by the slider: midday-ish at 0, 2 deg above the horizon at GOLDEN
+_T = f"min(n / {GOLDEN}, 1.0)"
+SUN_ELEV_EXPR = f"radians(24.0 - 22.0 * {_T})"
+SUN_AZ_EXPR = f"radians(235.0 + 55.0 * {_T})"
 
 
 def _sun_rotation():
@@ -58,7 +63,16 @@ def _world():
     attr = nt.nodes.new("ShaderNodeAttribute")
     attr.attribute_type = "VIEW_LAYER"
     attr.attribute_name = P.NIGHT_PROP
-    nt.links.new(attr.outputs["Fac"], mix.inputs["Fac"])
+    # 0 .. GOLDEN: the day sky with the sun sinking (golden hour at ~0.6);
+    # GOLDEN .. 1: cross-fade to the after-sunset dusk sky
+    after = nt.nodes.new("ShaderNodeMapRange")
+    after.interpolation_type = "SMOOTHSTEP"
+    after.inputs["From Min"].default_value = GOLDEN
+    after.inputs["From Max"].default_value = 1.0
+    nt.links.new(attr.outputs["Fac"], after.inputs["Value"])
+    nt.links.new(after.outputs[0], mix.inputs["Fac"])
+    C.drive(sky, "sun_elevation", SUN_ELEV_EXPR)
+    C.drive(sky, "sun_rotation", SUN_AZ_EXPR)
     nt.links.new(bg_day.outputs[0], mix.inputs[1])
     nt.links.new(bg_night.outputs[0], mix.inputs[2])
     nt.links.new(mix.outputs[0], out.inputs["Surface"])
@@ -116,8 +130,13 @@ def _render_settings():
 def build(root):
     coll = C.collection("Lighting", root)
     _world()
-    sun = _light("Sun", "SUN", coll, "2.8 * (1 - n)", color=(1.0, 0.93, 0.82), angle=math.radians(0.6))
+    sun = _light("Sun", "SUN", coll, "3.0 * max(0.0, 1.0 - (n / 0.85) ** 2)",
+                 color=(1.0, 0.93, 0.82), angle=math.radians(0.6))
     sun.rotation_euler = _sun_rotation()
+    C.drive(sun, "rotation_euler", f"pi / 2 - {SUN_ELEV_EXPR}", index=0)
+    C.drive(sun, "rotation_euler", f"pi - {SUN_AZ_EXPR}", index=2)
+    C.drive(sun.data, "color", f"0.93 - 0.33 * {_T}", index=1)
+    C.drive(sun.data, "color", f"0.82 - 0.52 * {_T}", index=2)
     moon = _light("Moon", "SUN", coll, "0.06 * n", color=(0.6, 0.7, 1.0), angle=math.radians(1.0))
     moon.rotation_euler = (math.radians(40), 0, math.radians(30))
     spots = bpy.context.scene.get("_flood_spots", [])

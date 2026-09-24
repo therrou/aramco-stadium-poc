@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A desktop-browser PoC that renders the Blender stadium close to the Cycles stills, with a Day / Golden / Night toggle and section → seat camera fly-to over 46,074 pickable seats.
+**Goal:** A desktop-browser PoC that renders the Blender stadium close to the Cycles stills, with a Day / Golden / Night toggle and a camera that zooms to a clicked section (area), with 46,074 seats coloured by mock availability.
 
 **Architecture:** A Blender-side exporter (`scripts/export_web.py` + `scripts/webexport/`) reads the open scene without modifying it. It builds a temporary `WebExport` scene of merged copies, bakes lightmaps, albedo and environment maps for the three lighting states, and writes raw assets plus a `manifest.json` to `build/web_raw/`. `scripts/optimize_web.sh` compresses them into `web/public/assets/` (meshopt, KTX2). A Vite + TypeScript + Three.js app in `web/` loads the manifest and patches the stock `MeshStandardMaterial` to blend two RGBM lightmaps and two PMREM environments. Seats are drawn as one `InstancedMesh` plus a section-patch mesh that also serves for picking.
 
@@ -19,8 +19,8 @@
 - Visual match: the same camera as a Blender render gives the same composition, lighting mood and colours, in all three states. Pixel match is not expected.
 - Lighting states: Day `scene["night"] = 0.0`, Golden `0.6`, Night `1.0`.
 - Counts: 132 sections, 46,074 seats.
-- Fly-to: section ≈ 1.5 s eased; seat eye = seat + `EYE_H` 1.15 m up + 0.15 m forward along yaw, target = 22 % of the seat's plan position at z 0 (Blender `cameras._section_views`).
-- Seat colours: available green, taken grey, selected white + highlight, club tier cream.
+- Fly-to: **section (area) only**, ≈ 1.5 s eased. No seat-level fly-to and no seat selection in this PoC (scope change from the user, 2026-09-24).
+- Seat colours: available green, taken grey, club tier cream.
 - Mock availability: seeded, ≈ 35 % taken, clustered by section.
 - The render scene in `blender/aramco_stadium.blend` is never modified. The exporter works on a temporary scene and never saves the .blend.
 - Headless Blender hangs on this machine: run all Blender steps through the MCP `execute_blender_code` tool in the open session. Each call has a fresh namespace. Calls longer than 120 s may report "No data received" while still succeeding, so always verify the output on disk (see memory note `blender-mcp-gotchas`).
@@ -34,7 +34,8 @@
 |---|---|---|---|
 | D1 | seats.bin ≈ 17 B/seat | **19 B/seat** (2+1+2+4+4+4+2) plus a 16-byte header; 46,074 × 19 ≈ 0.88 MB | The spec's per-field sizes add up to 19. The header gives a magic number, version and count check. |
 | D2 | Exporter converts Z-up → Y-up | Only the `.glb` files are Y-up (glTF exporter). `seats.bin`, `sections.json` and `cameras.json` stay in Blender Z-up metres; the web converts all three through one function, `toThree([x,y,z]) = [x, z, -y]` | One conversion point, tested once. seats.bin can be checked byte-for-byte against `seats.csv`. |
-| D3 | Section fly-to uses `view.eye/target/fov` | Clicking a section flies to a **section framing** from over the pitch (`sectionFraming()`), so every seat in the section is visible and clickable. The spec's `view.*` is still used, behind a "View from this section" button | From `view.eye` you sit inside the section, and the rows behind you cannot be clicked. |
+| D3 | Section fly-to uses `view.eye/target/fov` | Clicking a section **zooms to the area**: `sectionFraming()` puts the camera over the pitch, looking at the section | `view.*` is a view from a seat inside the section. The user scoped the PoC to area zoom |
+| D11 | Section → seat pick, seat fly-to, selected colour | **Dropped** (user, 2026-09-24): no seat picking, no seat camera, no "selected" state. Seats are still drawn and coloured when zoomed in | PoC scope |
 | D4 | Emission = `emission × uEmission × nightEmission` | Emission strength = `emDay + n × (emNight − emDay)`, from per-material `extras.emDay/emNight` | This is the exact Blender formula (`common.night_emission`). Some materials glow in daylight, e.g. LED boards at 0.3. |
 | D5 | LightmapUV per merged object | One lightmap **atlas per group**: `pitch`, `bowl`, `sails`, `structure`, `site` (5 atlases × 3 states) | Avoids about 180 small textures. The sails get their own atlas, as the spec's risk table suggests. |
 | D6 | `seat.glb` low-poly ≤ 60 tris | The seat is built in code (`seatGeometry()`, 24 tris). Seats are shown only for sections within `SEAT_LOD_DIST` of the camera, with patches elsewhere | 46,074 × 60 = 2.76M tris would break the 2M budget alone. A test pins the worst case at ≤ 25k visible seats. |
@@ -49,7 +50,7 @@
 2. **Clicking during a flight** (another section, or Back mid-flight): the new flight starts from the current in-between pose, not from the old start or end. Pinned in Task 7 (`camera.test.ts`).
 3. **Window aspect changes** (resize, portrait): Blender's `sensor_fit = AUTO` puts the 62° on the *larger* dimension, so the vertical fov must be recomputed on every resize. Pinned in Task 7 (`flyto.test.ts`).
 4. **An optional asset is missing or fails** (no lightmaps before the bake, trees.glb 404): the viewer still runs, with fallback lights. A required asset failure shows the file name and retries only what failed. Pinned in Task 5 (`loader.test.ts`).
-5. **Clicking a taken seat, or empty space**: a taken seat still flies to its view, but it is labelled "Taken" and is never "selected". Empty space does nothing. Pinned in Task 8 (`state.test.ts`, `picking.test.ts`).
+5. **Clicking empty space, the same section again, or another section while zoomed**: empty space and the same section do nothing; another section flies there from the current pose. Pinned in Task 8 (`state.test.ts`).
 
 ---
 
@@ -85,9 +86,9 @@ web/src/seatsData.ts                    seats.bin parse, section index
 web/src/availability.ts                 seeded clustered mock
 web/src/seats.ts                        InstancedMesh, colours, seat LOD
 web/src/sectionPatches.ts               patch/hit mesh per section, visibility texture
-web/src/flyto.ts                        pure camera maths (seat view, framing, fov, path)
+web/src/flyto.ts                        pure camera maths (section framing, fov, path)
 web/src/camera.ts                       OrbitControls + flight tween
-web/src/picking.ts                      section raycast, seat ray-sphere pick
+web/src/picking.ts                      click-vs-drag detection for section picking
 web/src/state.ts                        app state reducer
 web/src/ui.ts                           side panel, toggle, legend, error/progress panels
 web/src/lightingState.ts                pure: states, transitions, sun, exposure
@@ -1778,9 +1779,9 @@ git commit -m "Web viewer: Vite/Three scaffold, capability check, loader with pr
 **Interfaces:**
 - Consumes: `seats_sample.bin` fixture (Task 1), `Assets.seatsBin`, `Assets.sections` (Task 5), `toThree`.
 - Produces:
-  - `seatsData.ts`: `interface SeatTable { count; section: Uint16Array; row: Uint8Array; seat: Uint16Array; pos: Float32Array /* Blender xyz, 3 per seat */; yaw: Float32Array }`; `parseSeats(buf: ArrayBuffer): SeatTable` (throws `Error("seats.bin: bad magic")` / `"...: length"`); `indexSections(t: SeatTable): Map<number, { start: number; end: number }>`; `findSeat(t, idx, section, row, seat): number` (−1 if none); `seatLabel(t, i): string` → `"212-2-17"`
+  - `seatsData.ts`: `interface SeatTable { count; section: Uint16Array; row: Uint8Array; seat: Uint16Array; pos: Float32Array /* Blender xyz, 3 per seat */; yaw: Float32Array }`; `parseSeats(buf: ArrayBuffer): SeatTable` (throws `Error("seats.bin: bad magic")` / `"...: length"`); `indexSections(t: SeatTable): Map<number, { start: number; end: number }>`
   - `availability.ts`: `type Avail = 0 | 1` (0 available, 1 taken); `mockAvailability(t: SeatTable, idx, seed = 2026): Uint8Array`
-  - `seats.ts`: `SEAT_COLORS = { available: 0x2fbf71, taken: 0x6b6f76, selected: 0xffffff, club: 0xefe3c8 }`; `seatGeometry(): THREE.BufferGeometry` (24 tris, front = +X); `seatColor(tier: string, avail: Avail, selected: boolean): number`; `class SeatField { mesh: THREE.InstancedMesh; setVisibleSections(ids: Set<number>): void; setSelected(i: number | -1): void }`; `visibleSections(camB: V3, sections: Section[], dist: number, always?: number): Set<number>`; `SEAT_LOD_DIST = 90`
+  - `seats.ts`: `SEAT_COLORS = { available: 0x2fbf71, taken: 0x6b6f76, club: 0xefe3c8 }`; `seatGeometry(): THREE.BufferGeometry` (24 tris, front = +X); `seatColor(tier: string, avail: Avail): number`; `class SeatField { mesh: THREE.InstancedMesh; setVisibleSections(ids: Set<number>): void }`; `visibleSections(camB: V3, sections: Section[], dist: number, always?: number): Set<number>`; `SEAT_LOD_DIST = 90`
   - `sectionPatches.ts`: `class SectionPatches { mesh: THREE.Mesh; sectionOfFace(faceIndex: number): number; setHidden(ids: Set<number>): void }`; `stripVertices(t, idx, sectionId): V3[]` (Blender coords, 2 per row)
 
 - [ ] **Step 1: Failing tests**
@@ -1789,7 +1790,7 @@ git commit -m "Web viewer: Vite/Three scaffold, capability check, loader with pr
 ```ts
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { parseSeats, indexSections, findSeat, seatLabel } from "./seatsData";
+import { parseSeats, indexSections } from "./seatsData";
 
 const buf = () => { const b = readFileSync(new URL("../test/fixtures/seats_sample.bin", import.meta.url)); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
 
@@ -1801,19 +1802,17 @@ describe("seats.bin (contract with scripts/webexport/seatbin.py)", () => {
     expect(t.pos[3]).toBeCloseTo(12.5, 4);
     expect(t.pos[5]).toBeCloseTo(14.9, 4);
     expect(t.yaw[2]).toBeCloseTo(-2.3562, 2);
-    expect(seatLabel(t, 2)).toBe("344-28-50");
   });
   it("rejects bad magic and truncation", () => {
     const b = new Uint8Array(buf()); b[0] = 0;
     expect(() => parseSeats(b.buffer)).toThrow(/magic/);
     expect(() => parseSeats(buf().slice(0, 72))).toThrow(/length/);
   });
-  it("indexes sections and finds seats", () => {
+  it("indexes sections", () => {
     const t = parseSeats(buf());
     const idx = indexSections(t);
     expect(idx.get(212)).toEqual({ start: 1, end: 2 });
-    expect(findSeat(t, idx, 212, 2, 17)).toBe(1);
-    expect(findSeat(t, idx, 212, 9, 9)).toBe(-1);
+    expect(idx.get(101)).toEqual({ start: 0, end: 1 });
   });
 });
 ```
@@ -1862,21 +1861,11 @@ describe("seats", () => {
     const g = seatGeometry();
     expect((g.index ? g.index.count : g.attributes.position.count) / 3).toBeLessThanOrEqual(24);
   });
-  it("colours by tier/availability/selection", () => {
-    expect(seatColor("Lower", 0, false)).toBe(SEAT_COLORS.available);
-    expect(seatColor("Club", 0, false)).toBe(SEAT_COLORS.club);
-    expect(seatColor("Club", 1, false)).toBe(SEAT_COLORS.taken);
-    expect(seatColor("Upper", 1, true)).toBe(SEAT_COLORS.taken);   // taken can't be selected
-    expect(seatColor("Upper", 0, true)).toBe(SEAT_COLORS.selected);
-  });
-  it("worst-case visible seats from any section view stays <= 25k", () => {
-    let worst = 0;
-    for (const s of doc.sections) {
-      const ids = visibleSections(s.view.eye, doc.sections, SEAT_LOD_DIST, Number(s.id));
-      const n = doc.sections.filter((x) => ids.has(Number(x.id))).reduce((a, x) => a + x.seats, 0);
-      worst = Math.max(worst, n);
-    }
-    expect(worst).toBeLessThanOrEqual(25_000);
+  it("colours by tier and availability", () => {
+    expect(seatColor("Lower", 0)).toBe(SEAT_COLORS.available);
+    expect(seatColor("Club", 0)).toBe(SEAT_COLORS.club);
+    expect(seatColor("Club", 1)).toBe(SEAT_COLORS.taken);
+    expect(seatColor("Upper", 1)).toBe(SEAT_COLORS.taken);
   });
   it("overview camera shows no individual seats", () => {
     expect(visibleSections([-330, -470, 230], doc.sections, SEAT_LOD_DIST).size).toBe(0);
@@ -1927,15 +1916,6 @@ export function indexSections(t: SeatTable) {
   }
   return idx;
 }
-
-export function findSeat(t: SeatTable, idx: Map<number, { start: number; end: number }>, section: number, row: number, seat: number) {
-  const r = idx.get(section);
-  if (!r) return -1;
-  for (let i = r.start; i < r.end; i++) if (t.row[i] === row && t.seat[i] === seat) return i;
-  return -1;
-}
-
-export const seatLabel = (t: SeatTable, i: number) => `${t.section[i]}-${t.row[i]}-${t.seat[i]}`;
 ```
 
 - [ ] **Step 3: `availability.ts`**
@@ -1975,8 +1955,8 @@ import type { Section } from "./loader";
 import type { SeatTable } from "./seatsData";
 import type { Avail } from "./availability";
 
-export const SEAT_COLORS = { available: 0x2fbf71, taken: 0x6b6f76, selected: 0xffffff, club: 0xefe3c8 } as const;
-export const SEAT_LOD_DIST = 90;   // m from camera to section centroid; the worst case is pinned by the test
+export const SEAT_COLORS = { available: 0x2fbf71, taken: 0x6b6f76, club: 0xefe3c8 } as const;
+export const SEAT_LOD_DIST = 90;   // m from camera to section centroid; the worst case is pinned in flyto.test.ts (Task 7)
 const CLUB_WIDTH = 0.58 / 0.5;     // params.CLUB.seat_w / LOWER.seat_w
 
 /** Low-poly seat, two boxes (pan + back), 24 tris. Front faces +X; origin at the tread. */
@@ -1988,9 +1968,8 @@ export function seatGeometry() {
   return g;
 }
 
-export function seatColor(tier: string, avail: Avail, selected: boolean) {
+export function seatColor(tier: string, avail: Avail) {
   if (avail === 1) return SEAT_COLORS.taken;
-  if (selected) return SEAT_COLORS.selected;
   return tier === "Club" ? SEAT_COLORS.club : SEAT_COLORS.available;
 }
 
@@ -2008,7 +1987,6 @@ export class SeatField {
   mesh: THREE.InstancedMesh;
   private matrices: Float32Array;
   private visible = new Set<number>();
-  private selected = -1;
   private tierOf = new Map<number, string>();
   constructor(private t: SeatTable, private idx: Map<number, { start: number; end: number }>, sections: Section[], public avail: Uint8Array) {
     for (const s of sections) this.tierOf.set(Number(s.id), s.tier);
@@ -2023,11 +2001,10 @@ export class SeatField {
       const w = this.tierOf.get(t.section[i]) === "Club" ? CLUB_WIDTH : 1;
       m.compose(p, q, new THREE.Vector3(1, 1, w));
       m.toArray(this.matrices, i * 16);
-      this.mesh.setColorAt(i, c.setHex(seatColor(this.tierOf.get(t.section[i])!, avail[i] as Avail, false)));
+      this.mesh.setColorAt(i, c.setHex(seatColor(this.tierOf.get(t.section[i])!, avail[i] as Avail)));
     }
     this.setVisibleSections(new Set());
   }
-  tier(i: number) { return this.tierOf.get(this.t.section[i])!; }
   /** Hidden seats get a zero matrix (degenerate triangles are culled before raster). */
   setVisibleSections(ids: Set<number>) {
     if (ids.size === this.visible.size && [...ids].every((i) => this.visible.has(i))) return;
@@ -2039,13 +2016,6 @@ export class SeatField {
       if (r) arr.set(this.matrices.subarray(r.start * 16, r.end * 16), r.start * 16);
     }
     this.mesh.instanceMatrix.needsUpdate = true;
-  }
-  setSelected(i: number) {
-    const c = new THREE.Color();
-    if (this.selected >= 0) this.mesh.setColorAt(this.selected, c.setHex(seatColor(this.tier(this.selected), this.avail[this.selected] as Avail, false)));
-    this.selected = i >= 0 && this.avail[i] === 0 ? i : -1;
-    if (this.selected >= 0) this.mesh.setColorAt(this.selected, c.setHex(SEAT_COLORS.selected).multiplyScalar(4)); // > 1 -> bloom highlight
-    this.mesh.instanceColor!.needsUpdate = true;
   }
 }
 ```
@@ -2119,7 +2089,7 @@ export class SectionPatches {
 - [ ] **Step 6: Run the tests**
 
 Run: `cd web && npx vitest run`
-Expected: PASS. If the worst-case test fails, lower `SEAT_LOD_DIST` in steps of 10 until it passes, and note the value in the commit message.
+Expected: PASS.
 
 - [ ] **Step 7: Wire into `main.ts` and check visually**
 
@@ -2148,17 +2118,17 @@ git commit -m "Web viewer: seats.bin parsing, clustered availability mock, insta
 
 ---
 
-### Task 7: Camera maths and fly-to
+### Task 7: Camera maths and fly-to (section zoom)
 
 **Files:**
 - Create: `web/src/flyto.ts`, `web/src/camera.ts`
 - Test: `web/src/flyto.test.ts`, `web/src/camera.test.ts`
 
 **Interfaces:**
-- Consumes: `SeatTable`, `Section`, `CameraDef`, `toThree`.
+- Consumes: `Section`, `CameraDef` (Task 5), `toThree/toBlender`, `visibleSections`, `SEAT_LOD_DIST` (Task 6).
 - Produces:
-  - `flyto.ts`: `EYE_H = 1.15`, `EYE_FWD = 0.15`, `TARGET_K = 0.22`, `SEAT_HFOV = 62`; `interface Pose { eye: V3; target: V3; hfov: number }` (Blender coords, hfov on the larger dimension); `seatPose(x, y, z, yaw): Pose`; `sectionFraming(s: Section): Pose`; `sectionViewPose(s: Section): Pose`; `cameraPose(c: CameraDef): Pose`; `verticalFov(hfovLarger: number, aspect: number): number` (degrees); `easeInOutCubic(t)`; `pathPoint(from: V3, to: V3, t: number): V3` (quadratic Bézier via the oculus when crossing the shell)
-  - `camera.ts`: `FLIGHT_S = 1.5`; `class CameraRig { camera; controls; pose(): Pose; flyTo(p: Pose, mode: "orbit" | "look"): Promise<void>; update(dt: number): void; resize(w, h): void; readonly flying: boolean }`; `poseAt(from: Pose, to: Pose, t: number): Pose` (pure, eased)
+  - `flyto.ts`: `interface Pose { eye: V3; target: V3; hfov: number }` (Blender coords, hfov on the larger image side); `sectionFraming(s: Section): Pose`; `cameraPose(c: CameraDef): Pose`; `verticalFov(hfovLarger: number, aspect: number): number` (degrees); `easeInOutCubic(t)`; `pathPoint(from: V3, to: V3, t: number): V3` (a quadratic Bézier over the oculus when the flight crosses the shell)
+  - `camera.ts`: `FLIGHT_S = 1.5`; `class CameraRig { camera; controls; pose(): Pose; flyTo(p: Pose): Promise<void>; jump(p: Pose): void; update(dt: number): void; resize(w, h): void; readonly flying: boolean }`; `poseAt(from: Pose, to: Pose, t: number): Pose` (pure, eased)
 
 - [ ] **Step 1: Failing tests**
 
@@ -2166,26 +2136,11 @@ git commit -m "Web viewer: seats.bin parsing, clustered availability mock, insta
 ```ts
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { seatPose, sectionFraming, verticalFov, pathPoint } from "./flyto";
+import { sectionFraming, verticalFov, pathPoint } from "./flyto";
+import { visibleSections, SEAT_LOD_DIST } from "./seats";
 import type { SectionsDoc } from "./loader";
 
 const doc: SectionsDoc = JSON.parse(readFileSync(new URL("../../data/sections.json", import.meta.url), "utf8"));
-const csv = readFileSync(new URL("../../data/seats.csv", import.meta.url), "utf8").trim().split("\n").slice(1).map((r) => r.split(","));
-
-describe("seat fly-to matches the Blender CAM_Seat_* formula", () => {
-  it("all 132 section view seats agree within 1 cm", () => {
-    let worst = 0;
-    for (const s of doc.sections) {
-      const [sec, row, seat] = s.view.seat.split("-");
-      const r = csv.find((c) => c[0] === sec && c[1] === row && c[2] === seat)!;
-      const [x, y, z, yaw] = r.slice(3).map(Number);
-      const p = seatPose(x, y, z, yaw);
-      for (let k = 0; k < 3; k++) worst = Math.max(worst, Math.abs(p.eye[k] - s.view.eye[k]), Math.abs(p.target[k] - s.view.target[k]));
-      expect(p.hfov).toBe(s.view.fov);
-    }
-    expect(worst).toBeLessThan(0.01);
-  });
-});
 
 describe("fov (Review Focus 3)", () => {
   it("Blender AUTO fit: hfov applies to the larger side", () => {
@@ -2195,7 +2150,7 @@ describe("fov (Review Focus 3)", () => {
   });
 });
 
-describe("section framing", () => {
+describe("section framing (decision D3: zoom to the area)", () => {
   it("looks at the section from inside the bowl, above it", () => {
     for (const s of doc.sections) {
       const f = sectionFraming(s);
@@ -2203,6 +2158,14 @@ describe("section framing", () => {
       expect(f.eye[2]).toBeGreaterThan(s.centroid[2]);
       expect(f.target).toEqual(s.centroid);
     }
+  });
+  it("worst-case visible seats from any section framing stays <= 25k (decision D6)", () => {
+    let worst = 0;
+    for (const s of doc.sections) {
+      const ids = visibleSections(sectionFraming(s).eye, doc.sections, SEAT_LOD_DIST, Number(s.id));
+      worst = Math.max(worst, doc.sections.filter((x) => ids.has(Number(x.id))).reduce((a, x) => a + x.seats, 0));
+    }
+    expect(worst).toBeLessThanOrEqual(25_000);
   });
 });
 
@@ -2215,8 +2178,7 @@ describe("flight path", () => {
     }
   });
   it("inside -> inside is a straight line", () => {
-    const p = pathPoint([0, -20, 35], [10, -50, 8], 0.5);
-    expect(p).toEqual([5, -35, 21.5]);
+    expect(pathPoint([0, -20, 35], [10, -50, 8], 0.5)).toEqual([5, -35, 21.5]);
   });
 });
 ```
@@ -2228,7 +2190,7 @@ import { poseAt } from "./camera";
 import type { Pose } from "./flyto";
 
 const A: Pose = { eye: [0, -20, 35], target: [0, 0, 0], hfov: 50 };
-const B: Pose = { eye: [10, -50, 8], target: [2, -11, 0], hfov: 62 };
+const B: Pose = { eye: [10, -50, 8], target: [2, -11, 0], hfov: 55 };
 const C: Pose = { eye: [-40, 20, 30], target: [0, 0, 0], hfov: 50 };
 
 it("poseAt hits both ends and eases", () => {
@@ -2239,8 +2201,7 @@ it("poseAt hits both ends and eases", () => {
 
 it("re-targeting mid-flight starts from the current in-between pose (Review Focus 2)", () => {
   const mid = poseAt(A, B, 0.4);
-  const next = poseAt(mid, C, 0);
-  expect(next).toEqual(mid);
+  expect(poseAt(mid, C, 0)).toEqual(mid);
   expect(poseAt(mid, C, 0.01).eye[0]).toBeCloseTo(mid.eye[0], 0);
 });
 ```
@@ -2253,22 +2214,15 @@ Run: `cd web && npx vitest run src/flyto.test.ts src/camera.test.ts` → FAIL.
 import type { V3 } from "./coords";
 import type { CameraDef, Section } from "./loader";
 
-export const EYE_H = 1.15, EYE_FWD = 0.15, TARGET_K = 0.22, SEAT_HFOV = 62;
 export interface Pose { eye: V3; target: V3; hfov: number }
 
-/** Same as scripts/stadium/cameras.py::_section_views (Blender coords). */
-export function seatPose(x: number, y: number, z: number, yaw: number): Pose {
-  return { eye: [x + Math.cos(yaw) * EYE_FWD, y + Math.sin(yaw) * EYE_FWD, z + EYE_H], target: [x * TARGET_K, y * TARGET_K, 0], hfov: SEAT_HFOV };
-}
-
-/** Decision D3: over the pitch, 60 m in front of the section and 25 m above it, looking at it. */
+/** Decision D3: zoom to the area. From over the pitch, 60 m in front of the section and 25 m above it. */
 export function sectionFraming(s: Section): Pose {
   const [cx, cy, cz] = s.centroid, r = Math.hypot(cx, cy);
   const k = Math.max(0, (r - 60) / r);
   return { eye: [cx * k, cy * k, cz + 25], target: [cx, cy, cz], hfov: 55 };
 }
 
-export const sectionViewPose = (s: Section): Pose => ({ eye: s.view.eye, target: s.view.target, hfov: s.view.fov });
 export const cameraPose = (c: CameraDef): Pose => ({ eye: c.eye, target: c.target, hfov: c.hfov });
 
 /** Blender sensor_fit AUTO: the fov applies to the larger image side. Returns Three's vertical fov. */
@@ -2282,7 +2236,7 @@ export const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 
 
 const inside = ([x, y, z]: V3) => Math.hypot(x / 76, y / 63) < 1 && z < 60;   // params.OCULUS_A/B, rim ~56 m
 
-/** Crossing the shell goes via a control point high over the oculus; otherwise a straight line. */
+/** Crossing the shell goes through a control point high over the oculus; otherwise a straight line. */
 export function pathPoint(from: V3, to: V3, t: number): V3 {
   if (inside(from) === inside(to)) return [0, 1, 2].map((k) => from[k] + (to[k] - from[k]) * t) as V3;
   const c: V3 = [0, 0, Math.max(from[2], to[2], 180)];
@@ -2290,6 +2244,7 @@ export function pathPoint(from: V3, to: V3, t: number): V3 {
   return [0, 1, 2].map((k) => u * u * from[k] + 2 * u * t * c[k] + t * t * to[k]) as V3;
 }
 ```
+If the worst-case seat test fails, lower `SEAT_LOD_DIST` in `seats.ts` in steps of 10 until it passes, and note the value in the commit message.
 
 - [ ] **Step 3: `camera.ts`**
 
@@ -2313,7 +2268,7 @@ export class CameraRig {
   camera = new THREE.PerspectiveCamera(40, 1, 0.1, 8000);
   controls: OrbitControls;
   private hfov = 40;
-  private flight: { from: Pose; to: Pose; t: number; mode: "orbit" | "look"; done: () => void } | null = null;
+  private flight: { from: Pose; to: Pose; t: number; done: () => void } | null = null;
   constructor(dom: HTMLElement) {
     this.controls = new OrbitControls(this.camera, dom);
     this.controls.enableDamping = true;
@@ -2330,9 +2285,9 @@ export class CameraRig {
     this.camera.lookAt(this.controls.target);
   }
   /** Starts from the current pose, so a click mid-flight re-targets smoothly (Review Focus 2). */
-  flyTo(to: Pose, mode: "orbit" | "look" = "orbit") {
+  flyTo(to: Pose) {
     this.flight?.done();
-    return new Promise<void>((done) => { this.flight = { from: this.pose(), to, t: 0, mode, done }; this.controls.enabled = false; });
+    return new Promise<void>((done) => { this.flight = { from: this.pose(), to, t: 0, done }; this.controls.enabled = false; });
   }
   jump(p: Pose) { this.apply(p); }
   update(dt: number) {
@@ -2340,17 +2295,7 @@ export class CameraRig {
     if (f) {
       f.t = Math.min(1, f.t + dt / FLIGHT_S);
       this.apply(poseAt(f.from, f.to, f.t));
-      if (f.t >= 1) {
-        this.flight = null;
-        this.controls.enabled = true;
-        const look = f.mode === "look";
-        this.controls.enableZoom = this.controls.enablePan = !look;
-        if (look) {  // look around from the seat: orbit a point 1 cm ahead of the eye
-          const dir = this.controls.target.clone().sub(this.camera.position).normalize();
-          this.controls.target.copy(this.camera.position).addScaledVector(dir, 0.01);
-        }
-        f.done();
-      }
+      if (f.t >= 1) { this.flight = null; this.controls.enabled = true; f.done(); }
     }
     this.controls.update();
   }
@@ -2373,7 +2318,8 @@ Replace the `PerspectiveCamera` + `OrbitControls` setup in `start()` with:
 ```ts
   const rig = new CameraRig(renderer.domElement);
   const overview = cameraPose(a.cameras["CAM_Aerial_SW"]);
-  rig.jump(params.get("cam") && a.cameras[params.get("cam")!] ? cameraPose(a.cameras[params.get("cam")!]) : overview);
+  const camParam = params.get("cam");
+  rig.jump(camParam && a.cameras[camParam] ? cameraPose(a.cameras[camParam]) : overview);
   const camera = rig.camera;
 ```
 Change `resize` to call `rig.resize(w, h)`. In the loop, call `rig.update(clock.getDelta())`, with `const clock = new THREE.Clock()` added. Extend the hooks: `exposeViewerHooks({ ..., flyTo: (p: Pose) => rig.flyTo(p) })`.
@@ -2383,24 +2329,24 @@ In Chrome, run `__viewer.flyTo({eye:[0,-20,35],target:[0,-55,5],hfov:55})` from 
 
 ```bash
 git add web/src
-git commit -m "Web viewer: fly-to maths (seat formula, section framing, AUTO-fit fov, oculus path) and camera rig"
+git commit -m "Web viewer: fly-to maths (section framing, AUTO-fit fov, oculus path) and camera rig"
 ```
 
 ---
 
-### Task 8: Picking, app state, side panel
+### Task 8: Section picking, app state, side panel
 
 **Files:**
 - Create: `web/src/state.ts`, `web/src/picking.ts`
 - Modify: `web/src/ui.ts`, `web/src/main.ts`
-- Test: `web/src/state.test.ts`, `web/src/picking.test.ts`
+- Test: `web/src/state.test.ts`
 
 **Interfaces:**
-- Consumes: `SectionPatches.sectionOfFace`, `SeatField`, `SeatTable`, `CameraRig`, `flyto.*`.
+- Consumes: `SectionPatches.sectionOfFace`, `SeatTable`, `indexSections`, availability `Uint8Array`, `CameraRig`, `sectionFraming`, `cameraPose`.
 - Produces:
-  - `state.ts`: `type View = { kind: "overview" } | { kind: "section"; section: number } | { kind: "seat"; section: number; seat: number }`; `interface AppState { view: View; selected: number /* seat index or -1 */; lighting: State }`; `type Action = { type: "section"; section: number } | { type: "seat"; seat: number; section: number; taken: boolean } | { type: "back" } | { type: "lighting"; lighting: State } | { type: "none" }`; `reduce(s: AppState, a: Action): AppState`; `initialState: AppState`
-  - `picking.ts`: `pickSeat(origin: V3, dir: V3, t: SeatTable, range: {start; end}): number` (Blender coords, sphere radius 0.35 m at seat + 0.45 m up, nearest hit, −1 if none); `class Picker { constructor(camera, patches, dom); onClick(cb: (ndc: THREE.Vector2) => void) }`, where a drag of more than 5 px is not a click
-  - `ui.ts`: `renderPanel(s: AppState, info: PanelInfo, on: { lighting(l: State): void; back(): void; viewFrom(): void })`
+  - `state.ts`: `type View = { kind: "overview" } | { kind: "section"; section: number }`; `interface AppState { view: View; lighting: State }`; `type Action = { type: "section"; section: number } | { type: "back" } | { type: "lighting"; lighting: State } | { type: "none" }`; `reduce(s: AppState, a: Action): AppState` (returns the same object when nothing changes); `initialState: AppState`
+  - `picking.ts`: `onClick(dom: HTMLElement, cb: (ndc: THREE.Vector2) => void)`; a pointer move of more than 5 px between down and up is a drag, not a click
+  - `ui.ts`: `interface PanelInfo { sectionLabel?: string; tier?: string; available?: number; total?: number }`; `renderPanel(s: AppState, info: PanelInfo, on: { lighting(l: State): void; back(): void })`
 
 - [ ] **Step 1: Failing tests**
 
@@ -2410,29 +2356,20 @@ import { describe, expect, it } from "vitest";
 import { reduce, initialState } from "./state";
 
 describe("app state", () => {
-  it("overview -> section -> seat -> back to overview", () => {
+  it("overview -> section -> back to overview", () => {
     let s = reduce(initialState, { type: "section", section: 212 });
     expect(s.view).toEqual({ kind: "section", section: 212 });
-    s = reduce(s, { type: "seat", seat: 900, section: 212, taken: false });
-    expect(s.view).toEqual({ kind: "seat", section: 212, seat: 900 });
-    expect(s.selected).toBe(900);
     s = reduce(s, { type: "back" });
     expect(s.view).toEqual({ kind: "overview" });
-    expect(s.selected).toBe(-1);
   });
-  it("taken seat: view it, never select it (Review Focus 5)", () => {
-    let s = reduce(initialState, { type: "section", section: 101 });
-    s = reduce(s, { type: "seat", seat: 5, section: 101, taken: true });
-    expect(s.view.kind).toBe("seat");
-    expect(s.selected).toBe(-1);
-  });
-  it("seat clicks outside the current section, or from overview, are ignored", () => {
-    expect(reduce(initialState, { type: "seat", seat: 1, section: 101, taken: false })).toBe(initialState);
+  it("another section while zoomed re-targets; the same section again is a no-op (Review Focus 5)", () => {
     const s = reduce(initialState, { type: "section", section: 101 });
-    expect(reduce(s, { type: "seat", seat: 1, section: 102, taken: false })).toBe(s);
+    expect(reduce(s, { type: "section", section: 102 }).view).toEqual({ kind: "section", section: 102 });
+    expect(reduce(s, { type: "section", section: 101 })).toBe(s);
   });
-  it("empty-space click changes nothing", () => {
+  it("empty-space click and back from overview change nothing", () => {
     expect(reduce(initialState, { type: "none" })).toBe(initialState);
+    expect(reduce(initialState, { type: "back" })).toBe(initialState);
   });
   it("lighting is independent of view", () => {
     const s = reduce(reduce(initialState, { type: "section", section: 7 }), { type: "lighting", lighting: "night" });
@@ -2442,55 +2379,32 @@ describe("app state", () => {
 });
 ```
 
-`web/src/picking.test.ts`:
-```ts
-import { expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { parseSeats } from "./seatsData";
-import { pickSeat } from "./picking";
-
-const b = readFileSync(new URL("../test/fixtures/seats_sample.bin", import.meta.url));
-const t = parseSeats(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
-
-it("hits the seat under a downward ray, misses empty space", () => {
-  expect(pickSeat([12.5, -70.25, 30], [0, 0, -1], t, { start: 0, end: 3 })).toBe(1);
-  expect(pickSeat([0, 0, 30], [0, 0, -1], t, { start: 0, end: 3 })).toBe(-1);
-});
-it("only considers the given range", () => {
-  expect(pickSeat([12.5, -70.25, 30], [0, 0, -1], t, { start: 2, end: 3 })).toBe(-1);
-});
-```
-
-Run: `cd web && npx vitest run src/state.test.ts src/picking.test.ts` → FAIL.
+Run: `cd web && npx vitest run src/state.test.ts` → FAIL.
 
 - [ ] **Step 2: `state.ts`**
 
 ```ts
 import type { State } from "./loader";
 
-export type View = { kind: "overview" } | { kind: "section"; section: number } | { kind: "seat"; section: number; seat: number };
-export interface AppState { view: View; selected: number; lighting: State }
+export type View = { kind: "overview" } | { kind: "section"; section: number };
+export interface AppState { view: View; lighting: State }
 export type Action =
   | { type: "section"; section: number }
-  | { type: "seat"; seat: number; section: number; taken: boolean }
   | { type: "back" }
   | { type: "lighting"; lighting: State }
   | { type: "none" };
 
-export const initialState: AppState = { view: { kind: "overview" }, selected: -1, lighting: "golden" };
+export const initialState: AppState = { view: { kind: "overview" }, lighting: "golden" };
 
 export function reduce(s: AppState, a: Action): AppState {
   switch (a.type) {
     case "section":
-      return { ...s, view: { kind: "section", section: a.section }, selected: -1 };
-    case "seat": {
-      if (s.view.kind === "overview" || s.view.section !== a.section) return s;
-      return { ...s, view: { kind: "seat", section: a.section, seat: a.seat }, selected: a.taken ? -1 : a.seat };
-    }
+      if (s.view.kind === "section" && s.view.section === a.section) return s;
+      return { ...s, view: { kind: "section", section: a.section } };
     case "back":
-      return { ...s, view: { kind: "overview" }, selected: -1 };
+      return s.view.kind === "overview" ? s : { ...s, view: { kind: "overview" } };
     case "lighting":
-      return { ...s, lighting: a.lighting };
+      return s.lighting === a.lighting ? s : { ...s, lighting: a.lighting };
     default:
       return s;
   }
@@ -2501,24 +2415,6 @@ export function reduce(s: AppState, a: Action): AppState {
 
 ```ts
 import * as THREE from "three";
-import type { V3 } from "./coords";
-import type { SeatTable } from "./seatsData";
-
-const R = 0.35, LIFT = 0.45;
-
-/** Nearest ray/sphere hit among seats [start, end) (Blender coords). */
-export function pickSeat(o: V3, d: V3, t: SeatTable, range: { start: number; end: number }) {
-  const dl = Math.hypot(...d), dx = d[0] / dl, dy = d[1] / dl, dz = d[2] / dl;
-  let best = -1, bestT = Infinity;
-  for (let i = range.start; i < range.end; i++) {
-    const cx = t.pos[i * 3] - o[0], cy = t.pos[i * 3 + 1] - o[1], cz = t.pos[i * 3 + 2] + LIFT - o[2];
-    const tc = cx * dx + cy * dy + cz * dz;
-    if (tc < 0) continue;
-    const d2 = cx * cx + cy * cy + cz * cz - tc * tc;
-    if (d2 < R * R && tc < bestT) { bestT = tc; best = i; }
-  }
-  return best;
-}
 
 /** Click (not drag) -> normalised device coordinates. */
 export function onClick(dom: HTMLElement, cb: (ndc: THREE.Vector2) => void) {
@@ -2539,29 +2435,24 @@ Append:
 import type { AppState } from "./state";
 import type { State } from "./loader";
 
-export interface PanelInfo { sectionLabel?: string; tier?: string; seatLabel?: string; seatTaken?: boolean }
+export interface PanelInfo { sectionLabel?: string; tier?: string; available?: number; total?: number }
 const LABEL: Record<State, string> = { day: "Day", golden: "Golden hour", night: "Night" };
 
-export function renderPanel(s: AppState, info: PanelInfo, on: { lighting(l: State): void; back(): void; viewFrom(): void }) {
+export function renderPanel(s: AppState, info: PanelInfo, on: { lighting(l: State): void; back(): void }) {
   const p = document.getElementById("panel")!;
   const seg = (["day", "golden", "night"] as State[])
     .map((l) => `<button data-l="${l}" aria-pressed="${s.lighting === l}">${LABEL[l]}</button>`).join("");
-  let body = `<p class="muted">Click a section to fly to it.</p>`;
-  if (s.view.kind !== "overview") {
-    body = `<h3>Section ${info.sectionLabel} <span class="muted">· ${info.tier}</span></h3>`;
-    body += s.view.kind === "seat"
-      ? `<p>Seat <b>${info.seatLabel}</b> — ${info.seatTaken ? `<span class="muted">Taken</span>` : "Selected"}</p>`
-      : `<p class="muted">Click a seat to see its view.</p><button id="viewfrom">View from this section</button>`;
-    body += `<p><button id="back">Back to overview</button></p>`;
-  }
+  const body = s.view.kind === "overview"
+    ? `<p class="muted">Click a section to zoom to it.</p>`
+    : `<h3>Section ${info.sectionLabel} <span class="muted">· ${info.tier}</span></h3>
+       <p>${info.available} of ${info.total} seats available</p>
+       <p><button id="back">Back to overview</button></p>`;
   p.innerHTML = `<div class="seg" role="group" aria-label="Time of day">${seg}</div>${body}
     <div class="legend"><span class="sw" style="background:var(--accent)"></span>Available
     <span class="sw" style="background:var(--taken)"></span>Taken
-    <span class="sw" style="background:#fff"></span>Selected
     <span class="sw" style="background:var(--club)"></span>Club tier</div>`;
   p.querySelectorAll<HTMLButtonElement>("[data-l]").forEach((b) => (b.onclick = () => on.lighting(b.dataset.l as State)));
   p.querySelector<HTMLButtonElement>("#back")?.addEventListener("click", on.back);
-  p.querySelector<HTMLButtonElement>("#viewfrom")?.addEventListener("click", on.viewFrom);
 }
 ```
 
@@ -2577,58 +2468,49 @@ In `start()`, after seats and rig exist:
     const prev = app;
     app = reduce(app, act);
     if (app === prev) return;
-    const v = app.view;
-    if (act.type === "section" && v.kind === "section") rig.flyTo(sectionFraming(secById.get(v.section)!));
-    if (act.type === "seat" && v.kind === "seat") {
-      const i = v.seat;
-      rig.flyTo(seatPose(table.pos[i * 3], table.pos[i * 3 + 1], table.pos[i * 3 + 2], table.yaw[i]), "look");
-    }
+    if (act.type === "section" && app.view.kind === "section") rig.flyTo(sectionFraming(secById.get(app.view.section)!));
     if (act.type === "back") rig.flyTo(overview);
-    seats.setSelected(app.selected);
-    lightingChanged?.(app.lighting);
+    if (act.type === "lighting") lightingChanged?.(app.lighting);
     draw();
   };
   const draw = () => {
-    const v = app.view, sec = v.kind === "overview" ? undefined : secById.get(v.section);
-    renderPanel(app, { sectionLabel: sec?.id, tier: sec?.tier, seatLabel: v.kind === "seat" ? seatLabel(table, v.seat) : undefined, seatTaken: v.kind === "seat" && avail[v.seat] === 1 }, {
+    const v = app.view, sec = v.kind === "section" ? secById.get(v.section) : undefined;
+    let available = 0, total = 0;
+    if (v.kind === "section") {
+      const { start, end } = idx.get(v.section)!;
+      total = end - start;
+      for (let i = start; i < end; i++) available += avail[i] === 0 ? 1 : 0;
+    }
+    renderPanel(app, { sectionLabel: sec?.id, tier: sec?.tier, available, total }, {
       lighting: (l) => dispatch({ type: "lighting", lighting: l }),
       back: () => dispatch({ type: "back" }),
-      viewFrom: () => { const s = app.view.kind !== "overview" && secById.get(app.view.section); if (s) rig.flyTo(sectionViewPose(s), "look"); },
     });
   };
   onClick(renderer.domElement, (ndc) => {
     ray.setFromCamera(ndc, rig.camera);
     const hit = ray.intersectObject(patches.mesh, false)[0];
-    if (app.view.kind !== "overview") {
-      const r = idx.get(app.view.section)!;
-      const o = toBlender(ray.ray.origin), d = toBlender(ray.ray.direction);
-      const i = pickSeat(o, d, table, r);
-      if (i >= 0) return dispatch({ type: "seat", seat: i, section: table.section[i], taken: avail[i] === 1 });
-    }
     dispatch(hit ? { type: "section", section: patches.sectionOfFace(hit.faceIndex!) } : { type: "none" });
   });
   addEventListener("keydown", (e) => e.key === "Escape" && dispatch({ type: "back" }));
   draw();
 ```
-Also make `visibleSections(...)` in the loop pass the selected section as `always`:
-`visibleSections(toBlender(rig.camera.position), a.sections.sections, SEAT_LOD_DIST, app.view.kind === "overview" ? -1 : app.view.section)`.
+Also make `visibleSections(...)` in the loop keep the current section's seats visible:
+`visibleSections(toBlender(rig.camera.position), a.sections.sections, SEAT_LOD_DIST, app.view.kind === "section" ? app.view.section : -1)`.
 
 - [ ] **Step 6: Tests and browser check**
 
 Run: `cd web && npx vitest run` → PASS.
 In Chrome, check each of these:
-1. Click a section patch: flight to its framing, and the panel shows "Section N · Tier".
-2. Click a green seat: flight to the seat view, the seat is white/glowing, and the panel says "Selected". Dragging looks around without moving.
-3. Click a grey seat: flight, and the panel says "Taken".
-4. "Back to overview" and Esc both work, including mid-flight.
-5. Clicking the sky does nothing.
-6. "View from this section" flies to the spec's `view.*`.
+1. Click a section patch: a 1.5 s flight zooms to the area, the individual seats appear with their colours, and the panel shows "Section N · Tier" plus "X of Y seats available".
+2. Click a different section while zoomed: the camera flies there from wherever it is, including mid-flight.
+3. "Back to overview" and Esc both work, including mid-flight.
+4. Clicking the sky does nothing. Dragging to orbit does not count as a click.
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add web/src
-git commit -m "Web viewer: section/seat picking, app state, side panel with legend"
+git commit -m "Web viewer: section picking, app state, side panel with legend"
 ```
 
 ---
@@ -3926,9 +3808,9 @@ git commit -m "Web viewer: visual check vs Cycles references, performance number
 - **Spec coverage:**
   - Export steps 1–10 → Tasks 2, 3, 10, 11, 12.
   - Optimize → Task 4.
-  - Web modules: `loader` (Task 5), `seats` (Task 6), `camera` (Task 7), `picking`/`ui` (Task 8), `lighting`/`stadium` (Task 9), trees (Task 13).
+  - Web modules: `loader` (Task 5), `seats` (Task 6), `camera` (Task 7), `picking`/`ui` (Task 8; section only, D11), `lighting`/`stadium` (Task 9), trees (Task 13).
   - Error handling → Tasks 5 and 8.
-  - Testing: counts in Tasks 1/2, seats.bin parsing in Task 6, lookup in Task 6, fly-to within 1 cm in Task 7, visual and performance checks in Task 14.
+  - Testing: counts in Tasks 1/2, seats.bin parsing in Task 6, lookup in Task 6, section framing and seat budget in Task 7, visual and performance checks in Task 14.
   - Risks: half-resolution iteration (draft quality), sails atlas (D5), Poly Haven LODs (Task 12, Step 1), bloom/AgX tuning (Task 14).
 - **Not covered by automated tests on purpose:** the Cycles bakes and glTF export. Each has an on-disk verification step, because headless Blender cannot run in CI on this machine.
 - **Draft-first order:** Tasks 5–9 run on the un-baked export (fallback lights), so the viewer can be reviewed before any multi-hour bake.

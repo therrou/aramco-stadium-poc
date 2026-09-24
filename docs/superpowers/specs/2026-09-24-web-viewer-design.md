@@ -14,6 +14,8 @@ It demonstrates what a 3D ticketing experience could look like. No real ticketin
 
 ## Scope
 
+> **Scope change (2026-09-24, user):** for the PoC the camera zooms to a clicked **section (area)**, not to a seat. Seat picking, the seat fly-to and the "selected" seat state are out of scope. Seats are still drawn and coloured by availability. The sections below about seat picking and seat fly-to are kept for a later phase.
+
 In scope:
 - An export pipeline from `blender/aramco_stadium.blend` to web assets.
 - A standalone web app (Vite + Three.js) that loads the assets and renders the scene.

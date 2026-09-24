@@ -33,9 +33,20 @@ export class CameraRig {
     this.camera.updateProjectionMatrix();
     this.camera.lookAt(this.controls.target);
   }
-  /** Starts from the current pose, so a click mid-flight re-targets smoothly (Review Focus 2). */
+  /**
+   * Starts from the current pose, so a click mid-flight re-targets smoothly (Review Focus 2).
+   * Flushes any residual OrbitControls damping momentum (from a drag or inertial pan just
+   * before the click) into position/target first, and zeroes it, so it can't leak into the
+   * flight over the following frames: three's OrbitControls.update() decays its internal
+   * sphericalDelta/panOffset by `dampingFactor` each call rather than clearing them outright,
+   * so a temporary `dampingFactor = 1` consumes the whole remaining delta in one step.
+   */
   flyTo(to: Pose) {
     this.flight?.done();
+    const damping = this.controls.dampingFactor;
+    this.controls.dampingFactor = 1;
+    this.controls.update();
+    this.controls.dampingFactor = damping;
     return new Promise<void>((done) => { this.flight = { from: this.pose(), to, t: 0, done }; this.controls.enabled = false; });
   }
   jump(p: Pose) { this.apply(p); }
@@ -45,6 +56,7 @@ export class CameraRig {
       f.t = Math.min(1, f.t + dt / FLIGHT_S);
       this.apply(poseAt(f.from, f.to, f.t));
       if (f.t >= 1) { this.flight = null; this.controls.enabled = true; f.done(); }
+      return;                        // don't let controls.update() re-derive position from stale internal state mid-flight
     }
     this.controls.update();
   }

@@ -1,0 +1,12 @@
+# large / binary / third-party
+blender/*.blend
+blender/*.blend1
+renders/
+refs/
+build/
+web/node_modules/
+web/dist/
+web/public/assets/
+graft/.cache/
+.DS_Store
+__pycache__/

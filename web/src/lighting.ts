@@ -8,6 +8,7 @@ import { LightingTransition, emissionStrength, envSizeMismatch, exposure, sunCol
 import { STATES, type Assets, type State } from "./loader";
 import { Sky } from "./background";
 import type { SharedUniforms } from "./stadium";
+import { clearTreeUniforms, makeTreeUniforms, updateTreeUniforms } from "./treeLight";
 
 export const BLOOM = { strength: 0.6, radius: 0.4, threshold: 1.0 };   // tuned in Task 14
 
@@ -22,6 +23,8 @@ export function makeComposer(renderer: THREE.WebGLRenderer, scene: THREE.Scene, 
 
 export class Lighting {
   t: LightingTransition;
+  /** Sun + ambient for the non-lightmapped meshes (trees, seats, patches); zero while the fallback lights are on. */
+  readonly outdoor = makeTreeUniforms();
   private pmrem: Partial<Record<State, THREE.Texture>> = {};
   private sky = new Sky();
   private fallbackSun?: THREE.DirectionalLight;
@@ -53,7 +56,7 @@ export class Lighting {
     this.update(0, 0);   // bind lightMap/envMap before the first compile, so USE_LIGHTMAP/USE_ENVMAP are set
   }
   request(s: State) { this.t.request(s); }
-  update(dt: number, cameraExposure: number) {
+  update(dt: number, cameraExposure: number, camera?: THREE.Camera) {
     this.t.update(dt);
     const { from, to } = this.t, e = this.t.eased, n = this.t.night;
     const key = `${from}>${to}`;
@@ -76,6 +79,8 @@ export class Lighting {
     this.sky.setBlend(e);
     for (const m of this.emissive) m.emissiveIntensity = emissionStrength(m.userData.emDay ?? 0, m.userData.emNight ?? 0, n);
     this.renderer.toneMappingExposure = exposure(n, cameraExposure);
+    if (!this.hasLightmaps) clearTreeUniforms(this.outdoor);
+    else if (camera) { camera.updateMatrixWorld(); updateTreeUniforms(this.outdoor, n, camera); }
     if (this.fallbackSun) {
       this.fallbackSun.position.copy(toThree(sunToward(n))).multiplyScalar(500);
       this.fallbackSun.intensity = sunStrength(n) * 0.9;

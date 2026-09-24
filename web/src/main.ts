@@ -16,6 +16,7 @@ import { STATES, type State } from "./loader";
 import { setupStadiumMaterials, type SharedUniforms } from "./stadium";
 import { Lighting, makeComposer } from "./lighting";
 import { missingLightmaps } from "./lightingState";
+import { setupTrees } from "./trees";
 
 const params = new URLSearchParams(location.search);
 
@@ -47,9 +48,6 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   scene.add(a.stadium.scene);
   const table = parseSeats(a.seatsBin), idx = indexSections(table);
   const avail = mockAvailability(table, idx);
-  const seats = new SeatField(table, idx, a.sections.sections, avail);
-  const patches = new SectionPatches(table, idx, avail);
-  scene.add(seats.mesh, patches.mesh);
   const rig = new CameraRig(renderer.domElement);
   const overview = cameraPose(a.cameras["CAM_Aerial_SW"]);
   const camParam = params.get("cam");
@@ -71,6 +69,10 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   });
   const startState = parseLighting(params.get("state"));
   const lighting = new Lighting(renderer, scene, a, groups, [...emissive], startState, shared, useLightmaps);
+  const seats = new SeatField(table, idx, a.sections.sections, avail, lighting.outdoor);
+  const patches = new SectionPatches(table, idx, avail, lighting.outdoor);
+  scene.add(seats.mesh, patches.mesh);
+  if (a.trees) { setupTrees(a.trees, a.impostors, lighting.outdoor); scene.add(a.trees.scene); }
   const composer = makeComposer(renderer, scene, camera);
   const perf = new Perf(params.has("stats"));
   const resize = () => {
@@ -82,7 +84,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   addEventListener("resize", resize);
   resize();
   renderer.info.autoReset = false;
-  exposeViewerHooks({ get fps() { return perf.fps; }, info: renderer.info, flyTo: (p: Pose) => rig.flyTo(p),
+  exposeViewerHooks({ get fps() { return perf.fps; }, info: renderer.info, scene, flyTo: (p: Pose) => rig.flyTo(p),
     setState: (s: State) => dispatch({ type: "lighting", lighting: s }),
     get night() { return lighting.t.night; }, tick: (dt = 1 / 60) => frame(dt) });
 
@@ -128,7 +130,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     seats.setVisibleSections(vis);
     patches.setHidden(vis);
     const camExp = app.view.kind === "overview" ? (camDef?.exposure ?? -0.4) : 0.1;
-    lighting.update(dt, camExp);
+    lighting.update(dt, camExp, camera);
     composer.render(dt);
   };
   renderer.setAnimationLoop(() => {

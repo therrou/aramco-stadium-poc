@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { toThree, type V3 } from "./coords";
 import type { SeatTable } from "./seatsData";
 import type { Avail } from "./availability";
+import { patchOutdoorLight, type OutdoorUniforms } from "./treeLight";
 
 /** Per row: first and last seat of the row, lifted 0.5 m (Blender coords). */
 export function stripVertices(t: SeatTable, idx: Map<number, { start: number; end: number }>, section: number): V3[] {
@@ -22,7 +23,7 @@ export class SectionPatches {
   private hidden: THREE.DataTexture;
   private slot = new Map<number, number>();
   private hiddenIds = new Set<number>();
-  constructor(t: SeatTable, idx: Map<number, { start: number; end: number }>, avail: Uint8Array) {
+  constructor(t: SeatTable, idx: Map<number, { start: number; end: number }>, avail: Uint8Array, outdoor?: OutdoorUniforms) {
     const pos: number[] = [], col: number[] = [], sec: number[] = [];
     const green = new THREE.Color(0x2fbf71), grey = new THREE.Color(0x6b6f76), c = new THREE.Color();
     [...idx.keys()].forEach((id, k) => {
@@ -50,6 +51,7 @@ export class SectionPatches {
         .replace("#include <common>", "#include <common>\nattribute float aSlot;\nuniform sampler2D uHidden;")
         .replace("#include <project_vertex>", "#include <project_vertex>\nif (texelFetch(uHidden, ivec2(int(aSlot), 0), 0).r > 0.5) gl_Position = vec4(0.0);");
     };
+    if (outdoor) patchOutdoorLight(mat, outdoor, "patches-outdoor");   // R11; composes with the hide patch above
     this.mesh = new THREE.Mesh(g, mat);
   }
   sectionOfFace(face: number) { return this.faceSection[face] ?? -1; }

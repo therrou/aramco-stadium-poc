@@ -31,6 +31,8 @@ export interface Assets {
   cameras: Record<string, CameraDef>;
   lightmaps: Record<State, Record<string, THREE.Texture>>;
   env: Record<State, THREE.DataTexture | null>;
+  /** Far-tree impostor atlases by species; a species whose atlas failed to load is absent. */
+  impostors: Record<string, { atlas: THREE.Texture; frames: number; size: number; centerZ: number }>;
 }
 
 export class AssetError extends Error {
@@ -93,6 +95,8 @@ export function assetJobs(m: Manifest, L: ReturnType<typeof makeLoaders>): Job<u
     for (const [, f] of Object.entries(st.lightmaps)) jobs.push({ file: f, run: () => L.ktx2.loadAsync(BASE + f) });
     if (st.env) jobs.push({ file: st.env, run: () => L.hdr.loadAsync(BASE + st.env!) });
   }
+  if (m.trees) for (const im of Object.values(m.trees.impostors))
+    jobs.push({ file: im.atlas, optional: true, run: () => L.ktx2.loadAsync(BASE + im.atlas) });
   return jobs;
 }
 
@@ -110,6 +114,11 @@ export function collect(m: Manifest, out: Map<string, unknown>): Assets {
     env[s] = m.states[s].env ? (out.get(m.states[s].env!) as THREE.DataTexture) : null;
     if (env[s]) env[s]!.mapping = THREE.EquirectangularReflectionMapping;
   }
+  const impostors: Assets["impostors"] = {};
+  if (m.trees) for (const [sp, im] of Object.entries(m.trees.impostors)) {
+    const t = out.get(im.atlas) as THREE.Texture | null | undefined;
+    if (t) { t.colorSpace = THREE.SRGBColorSpace; impostors[sp] = { ...im, atlas: t }; }
+  }
   return {
     manifest: m,
     stadium: out.get(m.stadium) as GLTF,
@@ -117,6 +126,6 @@ export function collect(m: Manifest, out: Map<string, unknown>): Assets {
     seatsBin: out.get(m.seats) as ArrayBuffer,
     sections: out.get(m.sections) as SectionsDoc,
     cameras: out.get(m.cameras) as Record<string, CameraDef>,
-    lightmaps, env,
+    lightmaps, env, impostors,
   };
 }

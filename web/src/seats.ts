@@ -4,6 +4,7 @@ import { toThree, type V3 } from "./coords";
 import type { Section } from "./loader";
 import type { SeatTable } from "./seatsData";
 import type { Avail } from "./availability";
+import { patchOutdoorLight, type OutdoorUniforms } from "./treeLight";
 
 export const SEAT_COLORS = { available: 0x2fbf71, taken: 0x6b6f76, club: 0xefe3c8 } as const;
 export const SEAT_LOD_DIST = 80;   // m from camera to section centroid; the worst case is pinned in flyto.test.ts (Task 7). Lowered from 90 -> 80 (worst-case 30,379 -> 20,098 seats) to satisfy decision D6 (<=25k).
@@ -36,11 +37,13 @@ export function visibleSections(camB: V3, sections: Section[], dist: number, alw
 export class SeatField {
   mesh: THREE.InstancedMesh;
   private matrices: Float32Array;
-  private visible = new Set<number>();
+  private colors: Float32Array;
+  private visible: Set<number> | null = null;   // null: nothing applied yet (the first call must not early-out)
   private tierOf = new Map<number, string>();
-  constructor(private t: SeatTable, private idx: Map<number, { start: number; end: number }>, sections: Section[], public avail: Uint8Array) {
+  constructor(private t: SeatTable, private idx: Map<number, { start: number; end: number }>, sections: Section[], public avail: Uint8Array, outdoor?: OutdoorUniforms) {
     for (const s of sections) this.tierOf.set(Number(s.id), s.tier);
     const mat = new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0 });
+    if (outdoor) patchOutdoorLight(mat, outdoor, "seats-outdoor");   // R11: no scene lights with lightmaps
     this.mesh = new THREE.InstancedMesh(seatGeometry(), mat, t.count);
     this.mesh.frustumCulled = false;
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), c = new THREE.Color();
@@ -53,18 +56,29 @@ export class SeatField {
       m.toArray(this.matrices, i * 16);
       this.mesh.setColorAt(i, c.setHex(seatColor(this.tierOf.get(t.section[i])!, avail[i] as Avail)));
     }
+    this.colors = (this.mesh.instanceColor!.array as Float32Array).slice();
     this.setVisibleSections(new Set());
   }
-  /** Hidden seats get a zero matrix (degenerate triangles are culled before raster). */
+  /**
+   * Packs the visible sections' seats at the front of the instance buffers and draws only those
+   * (`mesh.count`), so hidden seats cost nothing (Task 13: previously zero matrices, which still
+   * counted ~1.1M triangles per frame). Instance ids are therefore not seat indices.
+   */
   setVisibleSections(ids: Set<number>) {
-    if (ids.size === this.visible.size && [...ids].every((i) => this.visible.has(i))) return;
+    const cur = this.visible;
+    if (cur && ids.size === cur.size && [...ids].every((i) => cur.has(i))) return;
     this.visible = ids;
-    const arr = this.mesh.instanceMatrix.array as Float32Array;
-    arr.fill(0);
-    for (const id of ids) {
+    const arr = this.mesh.instanceMatrix.array as Float32Array, col = this.mesh.instanceColor!.array as Float32Array;
+    let n = 0;
+    for (const id of [...ids].sort((a, b) => a - b)) {
       const r = this.idx.get(id);
-      if (r) arr.set(this.matrices.subarray(r.start * 16, r.end * 16), r.start * 16);
+      if (!r) continue;
+      arr.set(this.matrices.subarray(r.start * 16, r.end * 16), n * 16);
+      col.set(this.colors.subarray(r.start * 3, r.end * 3), n * 3);
+      n += r.end - r.start;
     }
+    this.mesh.count = n;
     this.mesh.instanceMatrix.needsUpdate = true;
+    this.mesh.instanceColor!.needsUpdate = true;
   }
 }

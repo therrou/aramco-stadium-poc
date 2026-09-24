@@ -34,7 +34,11 @@ async function main() {
   const { NodeIO } = loadPkg('@gltf-transform/core');
   const { textureCompress } = loadPkg('@gltf-transform/functions');
 
-  const io = new NodeIO();
+  const { ALL_EXTENSIONS } = loadPkg('@gltf-transform/extensions');
+
+  // Register every extension so inputs that require one (e.g. KHR_texture_transform
+  // on the Poly Haven tree materials) can be read and are written back unchanged.
+  const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
   const document = await io.read(inFile);
 
   for (const spec of rest) {

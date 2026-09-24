@@ -2,7 +2,7 @@
 import math
 
 TARGETS = {"triangles": 2_000_000, "first_load_mb": 35.0, "draw_calls": 250}
-TREE_TRI_BUDGET = 450_000          # decision D9
+TREE_TRI_BUDGET = 350_000          # decision D9, lowered from 450k by ruling R14 (~2.0M tris in close views)
 SEAT_TRI_BUDGET = 25_000 * 24      # decision D6: <= 25k visible seats x 24 tris
 
 

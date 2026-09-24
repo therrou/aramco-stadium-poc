@@ -39,7 +39,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-opt_glb () {   # $1 in, $2 out
+opt_glb () {   # $1 in, $2 out, [$3 baseColor cap px, default 1024], [$4 extra slot=px caps]
   local tmp; tmp=$(mktemp -d)
   TMP_DIRS+=("$tmp")
   $GT dedup "$1" "$tmp/a.glb"
@@ -47,7 +47,7 @@ opt_glb () {   # $1 in, $2 out
   $GT prune "$tmp/b.glb" "$tmp/c.glb" --keep-attributes        # keep TEXCOORD_1 (lightmap UVs, unused until Tasks 10/12)
   $GT weld "$tmp/c.glb" "$tmp/d.glb"
   $GT resize "$tmp/d.glb" "$tmp/e0.glb" --width 2048 --height 2048     # global cap; emissiveTexture (baked later, Task 11) stays here
-  $GTJS "$tmp/e0.glb" "$tmp/e.glb" normalTexture=512 baseColorTexture=1024
+  $GTJS "$tmp/e0.glb" "$tmp/e.glb" normalTexture=512 baseColorTexture="${3:-1024}" ${4:-}
   $GT etc1s "$tmp/e.glb" "$tmp/f.glb" --slots '@(baseColorTexture|emissiveTexture)'
   $GT uastc "$tmp/f.glb" "$tmp/g.glb" --slots "normalTexture" --level 2 --zstd 18
   $GT meshopt "$tmp/g.glb" "$2"
@@ -55,7 +55,8 @@ opt_glb () {   # $1 in, $2 out
 }
 
 opt_glb "$RAW/stadium.glb" "$OUT/stadium.glb"
-[ -f "$RAW/trees.glb" ] && opt_glb "$RAW/trees.glb" "$OUT/trees.glb"
+# trees: near LODs are >= ~140 m from the bowl, so small textures are plenty (size budget, Task 12)
+[ -f "$RAW/trees.glb" ] && opt_glb "$RAW/trees.glb" "$OUT/trees.glb" 512 metallicRoughnessTexture=256
 cp "$RAW/seats.bin" "$RAW/sections.json" "$RAW/cameras.json" "$OUT/"
 
 # lightmaps and impostor atlases: PNG -> KTX2. Lightmaps are RGBM (linear), capped at 4096.

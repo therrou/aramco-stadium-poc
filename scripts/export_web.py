@@ -146,7 +146,19 @@ def stage_surfaces(report, quality):
     report["surface_uv"] = dict(bake.SURFACE_STATS)
 
 
-STAGES = {"data": stage_data, "geometry": stage_geometry, "surfaces": stage_surfaces, "bake": stage_bake}
+def stage_trees(report, quality):
+    from webexport import manifest, trees
+    sc, protos = trees.build(report)
+    trees.export(sc)
+    imp = {}
+    for sp, proto in protos.items():
+        if sp not in imp:
+            imp[sp] = trees.impostor_atlas(sp, proto)
+    manifest.merge(os.path.join(RAW, "manifest.json"), {"trees": {"glb": "trees.glb", "impostors": imp}})
+
+
+STAGES = {"data": stage_data, "geometry": stage_geometry, "surfaces": stage_surfaces, "bake": stage_bake,
+          "trees": stage_trees}
 
 
 def run(stages=("data", "geometry", "surfaces", "bake", "trees"), quality="draft"):

@@ -28,29 +28,22 @@ export function parseSeats(buf: ArrayBuffer): SeatTable {
 }
 
 /**
- * Seats are expected contiguous per section, but the real data/seats.csv (and so seats.bin,
- * which scripts/webexport/seatbin.py builds straight from it) is row-major across sections
- * (row 1 of every section, then row 2, ...), not section-major. Stable-sort the table by
- * section in place first so the {start,end} contract holds for downstream consumers
- * (SeatField, SectionPatches) that index a contiguous span per section. Deviation from the
- * task-6 brief, documented in task-6-report.md.
+ * Seats are contiguous per section in seats.bin (scripts/webexport/export_web.py's stage_data
+ * sorts rows by section via seatbin.sort_by_section before packing, since data/seats.csv itself
+ * is row-major across sections). This function stays pure (no mutation of `t`) and throws if
+ * that contract is ever violated, rather than silently computing a wrong {start,end} range.
  */
 export function indexSections(t: SeatTable) {
-  const order = Array.from({ length: t.count }, (_, i) => i).sort((a, b) => t.section[a] - t.section[b]);
-  const alreadySorted = order.every((v, i) => v === i);
-  if (!alreadySorted) {
-    const section = new Uint16Array(t.count), row = new Uint8Array(t.count), seat = new Uint16Array(t.count);
-    const pos = new Float32Array(t.count * 3), yaw = new Float32Array(t.count);
-    order.forEach((src, dst) => {
-      section[dst] = t.section[src]; row[dst] = t.row[src]; seat[dst] = t.seat[src]; yaw[dst] = t.yaw[src];
-      pos.set(t.pos.subarray(src * 3, src * 3 + 3), dst * 3);
-    });
-    t.section.set(section); t.row.set(row); t.seat.set(seat); t.yaw.set(yaw); t.pos.set(pos);
-  }
   const idx = new Map<number, { start: number; end: number }>();
   for (let i = 0; i < t.count; i++) {
-    const r = idx.get(t.section[i]);
-    if (r) r.end = i + 1; else idx.set(t.section[i], { start: i, end: i + 1 });
+    const sec = t.section[i];
+    const r = idx.get(sec);
+    if (r) {
+      if (r.end !== i) throw new Error(`seats.bin: section ${sec} is not contiguous`);
+      r.end = i + 1;
+    } else {
+      idx.set(sec, { start: i, end: i + 1 });
+    }
   }
   return idx;
 }

@@ -5,9 +5,14 @@ import type { SeatTable } from "./seatsData";
 import { indexSections } from "./seatsData";
 
 function realTable(): SeatTable {                        // from data/seats.csv (committed)
-  const rows = readFileSync(new URL("../../data/seats.csv", import.meta.url), "utf8").trim().split("\n").slice(1);
+  // data/seats.csv is row-major across sections; mirror the exporter's stable sort
+  // (scripts/webexport/seatbin.sort_by_section, applied in stage_data before packing seats.bin)
+  // so this matches what indexSections actually sees in production.
+  const rows = readFileSync(new URL("../../data/seats.csv", import.meta.url), "utf8").trim().split("\n").slice(1)
+    .map((r) => r.split(",").map(Number))
+    .sort((a, b) => a[0] - b[0]);
   const n = rows.length, t: SeatTable = { count: n, section: new Uint16Array(n), row: new Uint8Array(n), seat: new Uint16Array(n), pos: new Float32Array(n * 3), yaw: new Float32Array(n) };
-  rows.forEach((r, i) => { const [s, ro, se, x, y, z, yaw] = r.split(",").map(Number); t.section[i] = s; t.row[i] = ro; t.seat[i] = se; t.pos.set([x, y, z], i * 3); t.yaw[i] = yaw; });
+  rows.forEach(([s, ro, se, x, y, z, yaw], i) => { t.section[i] = s; t.row[i] = ro; t.seat[i] = se; t.pos.set([x, y, z], i * 3); t.yaw[i] = yaw; });
   return t;
 }
 

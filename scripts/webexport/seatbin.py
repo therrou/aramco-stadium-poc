@@ -18,6 +18,15 @@ def read_csv(path):
                  float(r["z"]), float(r["yaw"])) for r in csv.DictReader(f)]
 
 
+def sort_by_section(rows):
+    """Stable-sort rows by section (row 0), keeping row/seat order within a section.
+
+    data/seats.csv is written row-major across sections (row 1 of every section, then row 2, ...),
+    so seats.bin must be sorted here for it to be section-contiguous, which the web viewer's
+    SeatTable/indexSections relies on."""
+    return sorted(rows, key=lambda r: r[0])
+
+
 def pack(rows):
     out = bytearray(struct.pack(HEADER_FMT, MAGIC, VERSION, len(rows), 0))
     for r in rows:

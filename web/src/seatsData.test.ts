@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { parseSeats, indexSections } from "./seatsData";
+import { parseSeats, indexSections, type SeatTable } from "./seatsData";
 
 const buf = () => { const b = readFileSync(new URL("../test/fixtures/seats_sample.bin", import.meta.url)); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
 
@@ -23,5 +23,22 @@ describe("seats.bin (contract with scripts/webexport/seatbin.py)", () => {
     const idx = indexSections(t);
     expect(idx.get(212)).toEqual({ start: 1, end: 2 });
     expect(idx.get(101)).toEqual({ start: 0, end: 1 });
+  });
+  it("does not mutate the table", () => {
+    const t = parseSeats(buf());
+    const before = [...t.section];
+    indexSections(t);
+    expect([...t.section]).toEqual(before);
+  });
+  it("throws if a section is not contiguous", () => {
+    const t: SeatTable = {
+      count: 3,
+      section: new Uint16Array([101, 212, 101]),
+      row: new Uint8Array(3),
+      seat: new Uint16Array(3),
+      pos: new Float32Array(9),
+      yaw: new Float32Array(3),
+    };
+    expect(() => indexSections(t)).toThrow(/section 101 is not contiguous/);
   });
 });

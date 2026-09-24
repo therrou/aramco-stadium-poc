@@ -45,3 +45,33 @@ def test_real_csv_counts():
     assert len(rows) == 46074
     assert len({r[0] for r in rows}) == 132
     assert max(r[1] for r in rows) < 256 and max(r[2] for r in rows) < 65536
+
+
+def _is_section_contiguous(rows):
+    seen, section = set(), None
+    for r in rows:
+        if r[0] != section:
+            if r[0] in seen:
+                return False
+            seen.add(r[0])
+            section = r[0]
+    return True
+
+
+def test_real_csv_is_not_section_contiguous():
+    """data/seats.csv is row-major across sections (row 1 of every section, then row 2, ...);
+    this pins that fact so the exporter keeps sorting it, see test_sort_by_section below."""
+    assert not _is_section_contiguous(seatbin.read_csv(CSV))
+
+
+def test_sort_by_section_makes_it_contiguous():
+    rows = seatbin.sort_by_section(seatbin.read_csv(CSV))
+    assert _is_section_contiguous(rows)
+    assert len({r[0] for r in rows}) == 132
+
+
+def test_sort_by_section_is_stable_within_a_section():
+    rows = seatbin.read_csv(CSV)
+    original_order = [(r[0], r[1], r[2]) for r in rows if r[0] == 101]
+    sorted_order = [(r[0], r[1], r[2]) for r in seatbin.sort_by_section(rows) if r[0] == 101]
+    assert sorted_order == original_order

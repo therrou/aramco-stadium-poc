@@ -50,7 +50,7 @@ def _cameras():
 def stage_data(report):
     from webexport import manifest, seatbin
     os.makedirs(RAW, exist_ok=True)
-    rows = seatbin.read_csv(os.path.join(DATA, "seats.csv"))
+    rows = seatbin.sort_by_section(seatbin.read_csv(os.path.join(DATA, "seats.csv")))
     blob = seatbin.pack(rows)
     with open(os.path.join(RAW, "seats.bin"), "wb") as f:
         f.write(blob)

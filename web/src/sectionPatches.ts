@@ -21,6 +21,7 @@ export class SectionPatches {
   private faceSection: number[] = [];
   private hidden: THREE.DataTexture;
   private slot = new Map<number, number>();
+  private hiddenIds = new Set<number>();
   constructor(t: SeatTable, idx: Map<number, { start: number; end: number }>, avail: Uint8Array) {
     const pos: number[] = [], col: number[] = [], sec: number[] = [];
     const green = new THREE.Color(0x2fbf71), grey = new THREE.Color(0x6b6f76), c = new THREE.Color();
@@ -40,7 +41,8 @@ export class SectionPatches {
     g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
     g.setAttribute("aSlot", new THREE.Float32BufferAttribute(sec, 1));
     g.computeVertexNormals();
-    this.hidden = new THREE.DataTexture(new Uint8Array(256), 256, 1, THREE.RedFormat);
+    const slots = Math.max(1, idx.size);
+    this.hidden = new THREE.DataTexture(new Uint8Array(slots), slots, 1, THREE.RedFormat);
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide });
     mat.onBeforeCompile = (s) => {
       s.uniforms.uHidden = { value: this.hidden };
@@ -52,6 +54,8 @@ export class SectionPatches {
   }
   sectionOfFace(face: number) { return this.faceSection[face] ?? -1; }
   setHidden(ids: Set<number>) {
+    if (ids.size === this.hiddenIds.size && [...ids].every((i) => this.hiddenIds.has(i))) return;
+    this.hiddenIds = ids;
     const d = this.hidden.image.data as Uint8Array;
     d.fill(0);
     for (const id of ids) d[this.slot.get(id)!] = 255;

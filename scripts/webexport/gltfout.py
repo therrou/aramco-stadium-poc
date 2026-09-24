@@ -19,9 +19,16 @@ def web_material(info, baked):
 
     def image(img_name, sock, non_color=False):
         t = nt.nodes.new("ShaderNodeTexImage")
-        t.image = bpy.data.images[img_name]
-        if non_color:
-            t.image.colorspace_settings.name = "Non-Color"
+        img = bpy.data.images[img_name]
+        if non_color and img.colorspace_settings.name != "Non-Color":
+            # never touch a source image the render scene shares: use a Non-Color copy
+            cp = bpy.data.images.get(img_name + ".web")
+            if cp is None:
+                cp = img.copy()
+                cp.name = img_name + ".web"
+                cp.colorspace_settings.name = "Non-Color"
+            img = cp
+        t.image = img
         nt.links.new(uv.outputs["UV"], t.inputs["Vector"])
         nt.links.new(t.outputs["Color"], sock)
         return t

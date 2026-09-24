@@ -36,7 +36,7 @@ Out of scope for this PoC:
 | Frame rate | ≥ 50 fps at 1080p on an M1-class laptop |
 | Triangles on screen | ≤ 2M |
 | Draw calls | ≤ 250 |
-| Visual match | Same camera as a Blender render → same composition, lighting mood and colours (checked side by side, day and night) |
+| Visual match | Same camera as a Blender render → same composition, lighting mood and colours (checked side by side, all three states) |
 
 ## Architecture
 
@@ -47,8 +47,8 @@ blender/aramco_stadium.blend
 build/web_raw/         glb + png/exr (uncompressed)
         │  scripts/optimize_web.sh  (gltf-transform: meshopt, KTX2, prune, dedup)
         ▼
-web/public/assets/     stadium.glb, lightmaps (day/night), env maps,
-                       (day/golden/night), trees.glb, seats.bin, sections.json
+web/public/assets/     stadium.glb, lightmaps + env maps (day/golden/night),
+                       trees.glb, seats.bin, sections.json
         ▼
 web/  (Vite + Three.js app)
 ```

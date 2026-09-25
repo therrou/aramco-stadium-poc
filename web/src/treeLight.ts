@@ -20,7 +20,11 @@ export const TREE_AMBIENT = { day: 0.9, golden: 0.55, night: 0.12 };
  * web approximates them by a uniform irradiance inside the shell's plan superellipse (params.SHELL_*),
  * fading out over the last 10 % of its radius, times n. `irradiance` is W/m^2 like the sun (Blender units).
  */
-export const FLOOD = { irradiance: 6.0, color: [0.95, 0.97, 1.0] as const, a: 138.0, b: 121.0, n: 2.25 };
+// irradiance (fix round 1): measured from the night bowl lightmap, decoded RGBM x PI as stadium.ts applies it,
+// at the centres of the 78,586 up-facing tier treads (bowl__M_Concrete, z > 1.5 m): mean (1.14, 1.18, 0.95),
+// median 0.72. The night ambient already adds PI * 0.12 * ~0.87 = 0.33, so the flood term is 1.14 - 0.33 = 0.8.
+// (6.0 before lit the seats ~5x brighter than the treads around them.)
+export const FLOOD = { irradiance: 0.8, color: [0.95, 0.97, 1.0] as const, a: 138.0, b: 121.0, n: 2.25 };
 export const makeTreeUniforms = (): TreeUniforms => ({ uSunDirView: { value: new THREE.Vector3() }, uSun: { value: new THREE.Color() }, uAmbient: { value: new THREE.Color() },
   uFlood: { value: new THREE.Color() }, uUpView: { value: new THREE.Vector3() } });
 

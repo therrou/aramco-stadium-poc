@@ -39,16 +39,24 @@ export function agxLookChunk(chunk: string, look = AGX_LOOK) {
  * buffer (EXT_clip_control) that gives ~float32 relative precision at any distance, so the 1-3 cm layer
  * gaps of the site (sand -0.05, lawn/plaza -0.01, paving 0.01, asphalt 0.02-0.03, glow 0.035) stay
  * separate out to the 8 km far plane. Without a float depth texture three allocates DEPTH_COMPONENT24,
- * where reversed Z gains little. MSAA only below DPR 2 (at DPR 2 four samples cost ~280 MB of targets).
+ * where reversed Z gains little. The depth is only tested, never sampled: no MSAA depth resolve.
  */
 export function sceneTarget(renderer: THREE.WebGLRenderer) {
   const reversed = renderer.capabilities.reversedDepthBuffer;
   return new THREE.WebGLRenderTarget(1, 1, {
     type: THREE.HalfFloatType,
-    samples: renderer.getPixelRatio() < 2 ? 4 : 0,
+    samples: msaaSamples(renderer.getPixelRatio()),
+    resolveDepthBuffer: false,
     ...(reversed ? { depthTexture: new THREE.DepthTexture(1, 1, THREE.FloatType) } : {}),
   });
 }
+
+/**
+ * Fix round 1: MSAA on the one scene target. DPR >= 2 (M1 laptops) already supersamples edges, but thin
+ * overlays (road lines, balustrades, truss members) still shimmer, so 2 samples there (~1.9x the colour
+ * memory of the target, far below 4x at 7 Mpx); 4 samples below DPR 2.
+ */
+export const msaaSamples = (dpr: number) => (dpr >= 2 ? 2 : 4);
 
 export function makeComposer(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
   THREE.ShaderChunk.tonemapping_pars_fragment = agxLookChunk(THREE.ShaderChunk.tonemapping_pars_fragment);
@@ -56,7 +64,11 @@ export function makeComposer(renderer: THREE.WebGLRenderer, scene: THREE.Scene, 
   const c = new EffectComposer(renderer, sceneTarget(renderer));
   c.addPass(new RenderPass(scene, camera));
   c.addPass(new UnrealBloomPass(new THREE.Vector2(256, 256), BLOOM.strength, BLOOM.radius, BLOOM.threshold));
-  c.addPass(new OutputPass());
+  const out = new OutputPass();
+  // no ping-pong: RenderPass and bloom work in place on readBuffer, OutputPass draws to the canvas, so
+  // without the swap the second (cloned, MSAA + float depth) target is never bound and never allocated
+  out.needsSwap = false;
+  c.addPass(out);
   return c;
 }
 

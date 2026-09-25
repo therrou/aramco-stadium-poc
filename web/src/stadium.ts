@@ -57,7 +57,59 @@ export function overlayOffset(reversedDepth: boolean) {
   return { factor: -1, units: reversedDepth ? 4 : -4 };
 }
 
+/**
+ * Fix round 1 (grazing specular): the PMREM has a bright horizon (day ~3.6) and a black lower hemisphere,
+ * so flat ground seen at a low angle mirrors the horizon sky over its whole extent: lawn and desert read
+ * blue-grey where Cycles reflects the scene around them. A/B at CAM_Aerial_SW: envMapIntensity 0 on
+ * these materials turned the lawn olive/tan like renders/aerial_sw_day.png. They keep a little sheen.
+ */
+export const GROUND_RE = /^M_(Sand|Lawn|Asphalt|Paving|Plaza)\b/;
+export const GROUND_ENV = 0.3;
+/** M_SailSkin: pearl metal with a clear coat (Blender coat 0.35, coat roughness 0.08). */
+export const SAIL_COAT = { clearcoat: 0.35, clearcoatRoughness: 0.08 };
+
+/** glTF gives MeshStandardMaterial (the export writes no coat): swap the sail skin for a physical copy. */
+export function toCoatedSail(m: THREE.MeshStandardMaterial) {
+  const p = new THREE.MeshPhysicalMaterial();
+  THREE.MeshStandardMaterial.prototype.copy.call(p, m);
+  p.defines = { STANDARD: "", PHYSICAL: "" };             // Standard.copy resets defines
+  p.clearcoat = SAIL_COAT.clearcoat;
+  p.clearcoatRoughness = SAIL_COAT.clearcoatRoughness;
+  return p;
+}
+
+export const groupOf = (o: THREE.Object3D) => (o.userData.lightmap ?? o.parent?.userData.lightmap) as string | undefined;
+
+/** Gives every (material, lightmap group) pair its own material; returns the number of copies made. */
+export function splitByGroup(root: THREE.Object3D) {
+  const owner = new Map<THREE.Material, string | undefined>();
+  const copies = new Map<string, THREE.Material>();
+  let n = 0;
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const m = mesh.material as THREE.Material, g = groupOf(o);
+    if (!owner.has(m)) { owner.set(m, g); return; }
+    if (owner.get(m) === g) return;
+    const key = `${m.uuid}:${g}`;
+    if (!copies.has(key)) { copies.set(key, m.clone()); n++; }
+    mesh.material = copies.get(key)!;
+  });
+  return n;
+}
+
 export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUniforms, useLightmaps: boolean, reversedDepth = false) {
+  const coated = new Map<THREE.Material, THREE.MeshPhysicalMaterial>();
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    const m = mesh.isMesh ? (mesh.material as THREE.MeshStandardMaterial) : null;
+    if (!m || !m.name.startsWith("M_SailSkin") || (m as THREE.MeshPhysicalMaterial).isMeshPhysicalMaterial) return;
+    if (!coated.has(m)) coated.set(m, toCoatedSail(m));
+    mesh.material = coated.get(m)!;
+  });
+  // A material shared by meshes of two lightmap groups (site__M_Lawn and site_near__M_Lawn share
+  // M_Lawn.web) must not be: each group binds its own atlas to material.lightMap. One copy per group.
+  splitByGroup(root);
   const byGroup = new Map<string, THREE.MeshStandardMaterial[]>();
   const seen = new Set<THREE.Material>();          // the optimized glb shares materials between meshes
   const chunk = patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps);
@@ -67,11 +119,12 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
     const mat = mesh.material as THREE.MeshStandardMaterial;
     if (seen.has(mat)) return;
     seen.add(mat);
-    const group = (o.userData.lightmap ?? o.parent?.userData.lightmap) as string | undefined;
+    const group = groupOf(o);
     const ex = mat.userData as { emDay?: number; emNight?: number; special?: string; tint?: number[] };
     if (Array.isArray(ex.tint) && ex.tint.length === 3) mat.color.setRGB(ex.tint[0], ex.tint[1], ex.tint[2]);   // Task 13b (E): linear, may exceed 1
     mat.userData.lmB = { value: null as THREE.Texture | null };
     mat.lightMapIntensity = Math.PI;        // Cycles diffuse bake is E/π; three multiplies by albedo/π
+    if (GROUND_RE.test(mat.name)) mat.envMapIntensity = GROUND_ENV;
     if (OVERLAY_RE.test(mat.name)) {
       const o = overlayOffset(reversedDepth);
       mat.polygonOffset = true;

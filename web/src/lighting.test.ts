@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import * as THREE from "three";
-import { BLOOM, agxLookChunk } from "./lighting";
+import { BLOOM, agxLookChunk, msaaSamples } from "./lighting";
 
 it("builds CustomToneMapping as AgX plus a log-space contrast look", () => {
   const out = agxLookChunk(THREE.ShaderChunk.tonemapping_pars_fragment, { contrast: 1.2, pivot: 0.606 });
@@ -14,4 +14,8 @@ it("throws when three's tone mapping chunk no longer matches", () => {
 });
 it("blooms only above the brightest non-emissive radiance (Task 13b measurement: 11.5)", () => {
   expect(BLOOM.threshold).toBeGreaterThan(11.5);
+});
+it("MSAA: 2 samples at DPR >= 2, 4 below", () => {
+  expect(msaaSamples(2)).toBe(2);
+  expect(msaaSamples(1)).toBe(4);
 });

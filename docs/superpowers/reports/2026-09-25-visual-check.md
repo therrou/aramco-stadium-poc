@@ -50,7 +50,7 @@ No constants were changed. The Task 13b pass had already tuned `EXPOSURE` (via
 `manifest.EXPOSURE` / `lightingState.exposure`), `BLOOM.threshold/strength`, and `TREE_AMBIENT`;
 the 9-way comparison above did not surface a case clearly calling for a further change (no milky
 bloom haze, no state reading over/under-exposed relative to its Cycles reference). `uRgbmRange`
-was left at 8, untouched, per the brief. Current tuned values (unchanged from 13b):
+was left at 16 (ruling R10; the viewer reads it from `manifest.rgbmRange`), untouched, per the brief. Current tuned values (unchanged from 13b):
 
 - `manifest.EXPOSURE` / `lightingState`: day 0.25, golden 0.55, night 0.75 (stops, mirrors
   `lighting._render_settings: 0.25 + 0.5*night`)
@@ -63,30 +63,33 @@ was left at 8, untouched, per the brief. Current tuned values (unchanged from 13
 
 Measured via the browser automation tab. The tab's `document.visibilityState` stayed `"hidden"`
 intermittently even after the window was clicked/focused (the known automation-tab gotcha from
-`browser-context.md`), which made the live `__viewer.fps` (rAF-driven) noisy on some samples
-(22–92 fps across repeated reads at the same URL). Where `visibilityState` read `"visible"` the
-rAF fps was clean and well above threshold, so those are reported as the primary number; the
-forced-tick timing loop (`renderer.info.reset()` + `__viewer.tick(1/60)` + `gl.getContext().finish()`,
-averaged over 60 frames, bypassing rAF throttling) is reported as a cross-check.
+`browser-context.md`), which made the live `__viewer.fps` (rAF-driven) vary between 22 and 92 fps across repeated reads at
+the same URL, with the automation tab's visibility. Where `visibilityState` read `"visible"` the
+rAF fps was clean and well above threshold, so those are reported as the primary number. The
+forced-tick loop (`renderer.info.reset()` + `__viewer.tick(1/60)` + `gl.getContext().finish()`,
+60 frames, bypassing rAF throttling) is a cross-check of one thing only: the CPU time to submit
+one frame plus the wait for the GPU to finish it. It is **not** a frame time and its inverse is
+**not** an achievable fps: it leaves out compositing, presentation, vsync and the browser's own
+work, and Chrome's `finish()` may return before all GPU work has retired.
 
 `?cam=CAM_Aerial_SW&state=night&size=1920x1080&stats=1`:
 - triangles: **1,298,521** (≤ 2,000,000 ✓)
 - draw calls: **90** (≤ 250 ✓)
 - fps (rAF, `visibilityState: "visible"`): **92.6**
-- forced-tick timing: median 0.4 ms/frame, max 0.9 ms/frame over 60 frames (≈2,460 fps-equivalent; GPU is not the bottleneck)
+- forced-tick cross-check (CPU submit + `finish()`, not frame time): median 0.4 ms, max 0.9 ms over 60 frames
 
 `?cam=CAM_Seat_212&state=night&size=1920x1080&stats=1`:
 - triangles: **1,648,369** (≤ 2,000,000 ✓)
 - draw calls: **91** (≤ 250 ✓)
 - fps (rAF, `visibilityState: "visible"`): **105.1**
-- forced-tick timing: median 0.4 ms/frame, max 9.2 ms/frame (one outlier frame, likely a GC/shader-cache pause) over 60 frames
+- forced-tick cross-check (CPU submit + `finish()`, not frame time): median 0.4 ms, max 9.2 ms (one outlier, likely a GC/shader-cache pause) over 60 frames
 
 Both cameras clear the fps ≥ 50 target by a wide margin; no perf fixes (pixel ratio, half-res
 bloom, `SEAT_LOD_DIST`) were needed.
 
 ## Build / test / optimize
 
-- `scripts/optimize_web.sh`: **32.09 MB TOTAL** (limit 35 MB) — full pass, rebuilt
+- `scripts/optimize_web.sh`: **32.09 MiB TOTAL** (= 33.65 MB decimal; limit 35 MB = 35e6 bytes, which `sizecheck.py` now reports in decimal MB) — full pass, rebuilt
   `web/public/assets` from the full-quality `build/web_raw` bake.
 - `cd web && npx vitest run`: **14 files / 59 tests passed**.
 - `cd web && npm run build` (`tsc --noEmit && vite build`): passed, no type errors; vite build
@@ -106,3 +109,13 @@ bloom, `SEAT_LOD_DIST`) were needed.
 
 None of the above were introduced or worsened by this task; none required constants-only tuning
 to correct, per the brief's tuning order and scope.
+
+## Addendum (final review): pitch line markings
+
+The "dark halfway line" reported in Task 11 was the line markings themselves (halfway line, goal
+lines, penalty/goal-area fronts) reading dark grey. The 6-12 cm wide `M_LineWhite` strips get
+lightmap charts well under one texel in the 256 px pitch atlas, so each strip sampled whichever texel
+its sliver landed on, often padding. No rebake: flat line fragments now take their lightmap UV from
+the grass's four planar quadrant charts at their own position (`web/src/pitchLines.ts`), per fragment,
+so the halfway line on the x = 0 chart seam uses the right chart on each side. Goal posts keep their own
+UVs. Checked at CAM_Bowl day and night: all markings white.

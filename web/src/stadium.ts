@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { MAX_CHARTS, chartUniforms, chartsOfMesh, pitchLinesGlsl, type Chart } from "./pitchLines";
 
 const LM_RE = /vec4 lightMapTexel = texture2D\( lightMap, vLightMapUv \);\s*vec3 lightMapIrradiance = lightMapTexel\.rgb \* lightMapIntensity;/;
 const IBL_IRR_RE = /iblIrradiance \+= getIBLIrradiance\( geometryNormal \);/;
@@ -83,6 +84,12 @@ export function toCoatedSail(m: THREE.MeshStandardMaterial) {
   return p;
 }
 
+/** Final review 4: flat pitch lines take their lightmap UV from the grass charts (see pitchLines.ts). */
+export const PITCH_LINES_RE = /^M_LineWhite\b/;
+export const PITCH_GRASS_RE = /^M_Grass\b/;
+/** The lines' lightmap lookup: every vLightMapUv of the (patched) chunk goes through pitchLmUv. */
+export const pitchLinesChunk = (chunk: string) => chunk.replaceAll("vLightMapUv", "pitchLmUv( vWorldPosB, vLightMapUv )");
+
 export const groupOf = (o: THREE.Object3D) => (o.userData.lightmap ?? o.parent?.userData.lightmap) as string | undefined;
 
 /** Gives every (material, lightmap group) pair its own material; returns the number of copies made. */
@@ -118,6 +125,12 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
   const byGroup = new Map<string, THREE.MeshStandardMaterial[]>();
   const seen = new Set<THREE.Material>();          // the optimized glb shares materials between meshes
   const chunk = patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps);
+  let grassCharts: Chart[] = [];
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh && groupOf(o) === "pitch" && PITCH_GRASS_RE.test((mesh.material as THREE.Material).name)) grassCharts = chartsOfMesh(mesh);
+  });
+  const lineCharts = grassCharts.length > 0 && grassCharts.length <= MAX_CHARTS ? grassCharts : null;
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
@@ -125,6 +138,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
     if (seen.has(mat)) return;
     seen.add(mat);
     const group = groupOf(o);
+    const lines = useLightmaps && lineCharts !== null && group === "pitch" && PITCH_LINES_RE.test(mat.name);
     const ex = mat.userData as { emDay?: number; emNight?: number; special?: string; tint?: number[] };
     if (Array.isArray(ex.tint) && ex.tint.length === 3) mat.color.setRGB(ex.tint[0], ex.tint[1], ex.tint[2]);   // Task 13b (E): linear, may exceed 1
     mat.userData.lmB = { value: null as THREE.Texture | null };
@@ -138,18 +152,19 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
     }
     if (group) (byGroup.get(group) ?? byGroup.set(group, []).get(group)!).push(mat);
     mat.onBeforeCompile = (s) => {
-      Object.assign(s.uniforms, shared, { uLmB: mat.userData.lmB });
+      Object.assign(s.uniforms, shared, { uLmB: mat.userData.lmB }, lines ? chartUniforms(lineCharts!) : {});
       s.vertexShader = s.vertexShader
         .replace("#include <common>", "#include <common>\nvarying vec3 vWorldPosB;")
         .replace("#include <worldpos_vertex>", "#include <worldpos_vertex>\nvec4 wpB = modelMatrix * vec4( transformed, 1.0 ); vWorldPosB = vec3( wpB.x, -wpB.z, wpB.y );");
       s.fragmentShader = s.fragmentShader
-        .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + PARS + (ex.special === "sailLeds" ? LED_GLSL : ""))
-        .replace("#include <lights_fragment_maps>", useLightmaps ? chunk : THREE.ShaderChunk.lights_fragment_maps);
+        .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + PARS + (ex.special === "sailLeds" ? LED_GLSL : "")
+          + (lines ? pitchLinesGlsl(lineCharts!.length) : ""))
+        .replace("#include <lights_fragment_maps>", useLightmaps ? (lines ? pitchLinesChunk(chunk) : chunk) : THREE.ShaderChunk.lights_fragment_maps);
       if (ex.special === "sailLeds")
         s.fragmentShader = s.fragmentShader.replace("#include <emissivemap_fragment>",
           "#include <emissivemap_fragment>\ntotalEmissiveRadiance *= sailLeds( vWorldPosB );");
     };
-    mat.customProgramCacheKey = () => `stadium-${useLightmaps}-${ex.special ?? ""}`;
+    mat.customProgramCacheKey = () => `stadium-${useLightmaps}-${ex.special ?? ""}${lines ? `-lines${lineCharts!.length}` : ""}`;
     mat.needsUpdate = true;
   });
   return byGroup;

@@ -129,3 +129,23 @@ Cycles' teal green by design.
 - The upper-tier seats are blue (spec tier colours), where Cycles has uniform green seats. This is a product choice, not a fidelity bug.
 
 Stage B (rebake, 2–5 h) awaits the user's decision.
+
+## Seat finder UI check (Task 15, visible Chrome tab; flights driven with `__viewer.tick` where rAF was throttled)
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Hover a seat (Stadium view): tooltip with section · row · seat, tier, click hint; it hides on pointer leave, drag and flight | ✓ (e.g. "Section 306 · Row 22 · Seat 4, Upper tier") |
+| 2 | Seats behind the roof or sails from `CAM_Aerial_SW` (Review Focus 4): a 456-point NDC grid over the stadium gave 20 accepted picks, all inside the oculus (NDC x −0.2…0.2, y 0.10…0.25) | ✓ |
+| 3 | Click a seat: pulsing highlight, flight to seat view, seat card, `?seat=` in the URL; the drag direction follows the pointer | ✓ after a fix: v1 look mode was inverted, so `rotateSpeed` is now −0.35 (test added) |
+| 4 | Zoom and Reset in seat view keep the eye (Review Focus 2): the eye is unchanged, hfov 70 → 49 → Reset 70; overview zoom dollies 100 → 70 m | ✓ |
+| 5 | Back / Esc / Overview control: view is overview, orbit mode, `seat` removed from the URL | ✓ |
+| 6 | Finder lists only real values; See the view flies there; the finder syncs to a clicked seat | ✓ |
+| 7 | All 10 hero views land on their camera; Stadium / Exterior / Top view land and show pressed; Auto orbit moves (9.9 m in 2 s at Exterior) and stops on user input | ✓ |
+| 8 | Lighting change in seat view keeps the seat; Auto orbit is disabled and ignored in seat view (Review Focus 3) | ✓ |
+| 9 | Fonts: "Aktiv Grotesk" 900 loaded and used by headings; body Archivo 400 | ✓ |
+| 10 | Deep links: `?seat=212-2-3` opens seat view; `?seat=212-10-4` (not a real seat) opens the overview and drops the param | ✓ |
+| 11 | Narrow (390×844 same-origin iframe; the window itself could not be resized): bottom sheet collapsed to its title bar, expands on tap; canvas = stage 390×792 CSS px (Review Focus 5); mode bar fits | ✓ after a fix: the mode bar overflowed with a scrollbar and was tightened |
+
+Not verified live: "Copy link" writing to the clipboard (the background window has no clipboard focus); the
+"Link copied" state is wired to the promise. The interaction GIF was not exported, because it would be a browser
+download.

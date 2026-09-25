@@ -65,13 +65,16 @@ export class CameraRig {
     this.controls.maxPolarAngle = MAX_POLAR;
   }
   get flying() { return this.flight !== null; }
-  /** Look mode (seat view): drag turns the head around a target SEAT_LOOK_M ahead; no pan, no dolly. */
+  /**
+   * Look mode (seat view): drag turns the head around a target SEAT_LOOK_M ahead; no pan, no dolly.
+   * Negative rotate speed: the scene follows the pointer (Street View), not the orbit's inverse.
+   */
   setMode(m: RigMode) {
     this.mode = m;
     const c = this.controls;
     c.enablePan = c.enableZoom = m === "orbit";
     c.minDistance = m === "orbit" ? MIN_DISTANCE_M : 0;
-    c.rotateSpeed = m === "orbit" ? 1 : 0.35;
+    c.rotateSpeed = m === "orbit" ? 1 : -0.35;
     if (m === "look") this.setAutoOrbit(false);
   }
   setAutoOrbit(on: boolean) { this.controls.autoRotate = on; this.controls.autoRotateSpeed = AUTO_ORBIT_SPEED; }

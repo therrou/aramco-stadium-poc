@@ -113,8 +113,8 @@ body.bare #app { top: 0; grid-template-columns: 1fr; }
   .ov-zoom { right: 12px; top: 64px; transform: none; }
   .icon { width: 34px; height: 34px; font-size: 15px; }
   .ov-bar { bottom: 68px; max-width: calc(100% - 24px); }
-  .bar { overflow-x: auto; max-width: 100%; }
-  .bar button { padding: 8px 10px; font-size: 10px; }
+  .bar { max-width: 100%; gap: 0; }
+  .bar button { padding: 8px 7px; font-size: 10px; letter-spacing: 0.03em; }
   .hints { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { #sidebar { transition: none; } }

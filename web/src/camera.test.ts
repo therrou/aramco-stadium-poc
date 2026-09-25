@@ -145,3 +145,16 @@ describe("zoom (Review Focus 2)", () => {
     expect(zoomedPose(p, 10, "look").hfov).toBe(LOOK_HFOV[1]);
   });
 });
+
+describe("seat view look mode", () => {
+  it("no pan or dolly, target may sit right in front of the eye, drag moves the scene with the pointer", () => {
+    const rig = new CameraRig(stubDom());
+    rig.setAutoOrbit(true);
+    rig.setMode("look");
+    const c = rig.controls;
+    expect([c.enablePan, c.enableZoom, c.minDistance, c.autoRotate]).toEqual([false, false, 0, false]);
+    expect(c.rotateSpeed).toBeLessThan(0);          // Street View convention: dragging left turns the view right
+    rig.setMode("orbit");
+    expect([c.enablePan, c.enableZoom, c.minDistance, c.rotateSpeed]).toEqual([true, true, MIN_DISTANCE_M, 1]);
+  });
+});

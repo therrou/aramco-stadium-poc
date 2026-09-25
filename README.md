@@ -128,9 +128,23 @@ Then:
     scripts/optimize_web.sh            # build/web_raw -> web/public/assets, fails above 35 MB (35e6 bytes)
     cd web && npm install && npm run dev
 
-URL parameters: `state=day|golden|night`, `cam=<Blender camera name>`, `size=1920x1080`, `stats=1`.
-Seat availability is a seeded mock. Numbering is the invented one in `data/`.
+URL parameters: `state=day|golden|night`, `cam=<Blender camera name>`, `size=1920x1080`, `stats=1`,
+`seat=<section>-<row>-<seat>` (opens in seat view; a malformed or unknown seat opens the overview), and
+`chrome=0` (hides the UI, for reference captures). Numbering is the invented one in `data/`.
 
-The PoC zooms to sections only (there is no seat fly-to); `CAM_Seat_*` framings are still valid
-values for `cam`. See `docs/superpowers/reports/2026-09-25-visual-check.md` for the Cycles-vs-viewer
-comparison and performance numbers.
+## Web viewer v2: seat finder
+
+Styled after aramcostadium.com. Pick Tier → Section → Row → Seat (only real seats from `seats.bin`) or click
+any seat. Hovering shows the seat, a click flies to a first-person view from it (drag looks around, zoom
+changes the field of view), and "Copy link" shares it as `?seat=`. The bottom bar has Stadium / Exterior /
+Top view / Auto orbit, and "Views worth exploring" lists the `CAM_Seat_*` cameras. Below 900 px wide, the
+sidebar becomes a bottom sheet.
+
+Headings use Aktiv Grotesk Black from `web/public/fonts/AktivGrotesk_Blk.woff2`. That is a licensed font, so
+the file is gitignored and stays local: copy it there on each machine. Without it, the headings fall back to
+Archivo (Google Fonts), which is also the body face.
+
+Rendering v2 (Stage A: shader and constant changes against the Cycles references, no rebake) and the
+remaining Stage B candidates are in `docs/superpowers/reports/2026-09-25-v2-visual-check.md`. The visual check
+tools: `web/scripts/capture.js` (run in the page on the dev server) and `python -m webexport.framestats`.
+The v1 comparison is `docs/superpowers/reports/2026-09-25-visual-check.md`.

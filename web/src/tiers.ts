@@ -5,12 +5,16 @@ export const TIERS: Tier[] = ["Lower", "Club", "Upper"];
 /** UI swatches, aramcostadium.com tokens (spec part 2). */
 export const TIER_HEX: Record<Tier, string> = { Lower: "#00D246", Club: "#EFE3C8", Upper: "#1480DB" };
 
-const luma = (r: number, g: number, b: number) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
-/** Linear albedo luminance of the Cycles seats (scripts/stadium/bowl.py): M_Seat (Lower, Upper), M_SeatClub. */
-const TIER_LUMA: Record<Tier, number> = { Lower: luma(0.03, 0.22, 0.12), Club: luma(0.72, 0.66, 0.55), Upper: luma(0.03, 0.22, 0.12) };
+/**
+ * v4 (user request: as close to the Blender render as possible): the seats take the Cycles albedo itself
+ * (scripts/stadium/bowl.py: M_Seat green on Lower and Upper, M_SeatClub on Club). The v2 (A6) swatch hues made
+ * the upper tier blue, which Blender never shows; TIER_HEX stays for the UI only.
+ */
+export const SEAT_ALBEDO: Record<Tier, [number, number, number]> = {
+  Lower: [0.03, 0.22, 0.12], Club: [0.72, 0.66, 0.55], Upper: [0.03, 0.22, 0.12],
+};
 
-/** A6 (v2): the tier's swatch hue at the Cycles seat brightness, in the linear working space. */
 export function tierAlbedo(t: Tier, out = new THREE.Color()) {
-  out.set(TIER_HEX[t]);
-  return out.multiplyScalar(TIER_LUMA[t] / luma(out.r, out.g, out.b));
+  const [r, g, b] = SEAT_ALBEDO[t];
+  return out.setRGB(r, g, b);          // linear working space, as the Blender values
 }

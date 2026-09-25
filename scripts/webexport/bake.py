@@ -170,6 +170,8 @@ def lightmap_uvs(objs_by_group, scale=1.0):
         if g in ORIENT_GROUPS:
             CHART_STATS.setdefault("flipped", {})[g] = orient_faces(objs, everyone)
         kw = {"hi": ATLAS_HI[g]} if g in ATLAS_HI else {}
+        if g in groups.ATLAS_LO:
+            kw["lo"] = groups.ATLAS_LO[g]
         tpm = groups.TEXELS_PER_M[g] * scale
         size = texel.atlas_size(_area(objs), tpm, **kw)
         st = CHART_STATS[g] = _chart_uvs(objs, size, tpm, CELL_M.get(g, 16.0), flat_cell=FLAT_CELL.get(g))

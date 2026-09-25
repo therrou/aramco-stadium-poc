@@ -81,7 +81,7 @@ export function patchLightsChunk(chunk: string) {
 	#endif
 	vec3 iblRadiance = mix( getIBLRadiance( geometryViewDir, geometryNormal, material.roughness ), getIBLRadianceB( geometryViewDir, geometryNormal, material.roughness ), uEnvBlend ) * lmSo;
 #ifdef PLANAR_REFLECT
-	iblRadiance = mix( iblRadiance, planarReflection( material.roughness ), uReflectOn );
+	iblRadiance = mix( iblRadiance, planarReflection( material.roughness ) * slabMask( diffuseColor.rgb ), uReflectOn );
 #endif`)
     .replace(COAT_RAD_RE, `clearcoatRadiance += mix( getIBLRadiance( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), getIBLRadianceB( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), uEnvBlend ) * lmSo;`);
 }
@@ -178,6 +178,14 @@ export interface LightingUniforms extends SharedUniforms { uLmB: { value: THREE.
  * Flat decals that sit on another surface by design (Task 13b, A): road lines lie exactly on the asphalt
  * (both z = 0.02), glow strips 5 mm above it, pitch lines 1 cm above the grass, podium strips on the deck.
  */
+/**
+ * v4: the optimized glb stores positions as 16-bit over the 2.6 km site (~4 cm steps), so the fan-zone paving
+ * (Blender z 0.012) landed 7 mm under the lawn it sits on (z -0.02) and the lawn, baked black beneath it, showed
+ * through from above. Paving meshes are lifted a few centimetres (invisible; the deck top moves too). Not M_Plaza:
+ * it is one disc centred on the stadium, hidden under the pitch (-1 cm), and lifting it covered the grass.
+ */
+export const PAVING_LIFT_RE = /^M_Paving\b/;
+export const PAVING_LIFT_M = 0.05;
 export const OVERLAY_RE = /^M_(RoadLine|StreetGlow|PodiumStrip|LineWhite)\b/;
 /**
  * polygonOffset pulling overlays toward the camera. three negates `factor` for a reversed depth buffer
@@ -308,6 +316,10 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
     if (mesh.isMesh && groupOf(o) === "pitch" && PITCH_GRASS_RE.test((mesh.material as THREE.Material).name)) grassCharts = chartsOfMesh(mesh);
   });
   const lineCharts = grassCharts.length > 0 && grassCharts.length <= MAX_CHARTS ? grassCharts : null;
+  root.traverse((o) => {                           // v4: paving over lawn survives the position quantization
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh && PAVING_LIFT_RE.test((mesh.material as THREE.Material).name)) mesh.position.y += PAVING_LIFT_M;
+  });
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;

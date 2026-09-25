@@ -125,7 +125,7 @@ only in the open session: after a Blender restart, rerun every stage from "geome
 
 Then:
 
-    scripts/optimize_web.sh            # build/web_raw -> web/public/assets, fails above 35 MB (35e6 bytes)
+    scripts/optimize_web.sh            # build/web_raw -> web/public/assets, fails above 46 MB (46e6 bytes; v4: denser sail/deck/pitch lightmaps)
     cd web && npm install && npm run dev
 
 URL parameters: `state=day|golden|night`, `cam=<Blender camera name>`, `size=1920x1080`, `stats=1`,

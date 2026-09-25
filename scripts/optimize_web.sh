@@ -87,4 +87,4 @@ for(const s of Object.values(m.states)) for(const g in s.lightmaps) s.lightmaps[
 if(m.trees&&m.trees.impostors) for(const i of Object.values(m.trees.impostors)) i.atlas=k(i.atlas);
 fs.writeFileSync(process.argv[2],JSON.stringify(m,null,1));' "$RAW/manifest.json" "$OUT/manifest.json"
 
-PYTHONPATH=scripts .venv/bin/python -m webexport.sizecheck "$OUT" --limit 35
+PYTHONPATH=scripts .venv/bin/python -m webexport.sizecheck "$OUT" --limit 46

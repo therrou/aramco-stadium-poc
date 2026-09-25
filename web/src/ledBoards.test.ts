@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BOARDS, boardU, panelAt, LED_GLSL_BOARDS, isLedBoard, whiteFromDark, fitLogo } from "./ledBoards";
+import { BOARDS, boardU, panelAt, LED_EMISSIVE_GLSL, LED_GLSL_BOARDS, isLedBoard, whiteFromDark, fitLogo } from "./ledBoards";
 
 describe("pitch LED ad boards", () => {
   it("runs one continuous coordinate round the board loop (metres), starting at the south-west corner", () => {
@@ -16,9 +16,11 @@ describe("pitch LED ad boards", () => {
     expect(panelAt(2 * BOARDS.panel + 0.1, 0)).toBe("aramco");
     expect(panelAt(0, 1)).toBe("akqa");                               // after one swap
   });
-  it("front (pitch side) shows the ad, the back (seat side) is black and empty", () => {
+  it("v4: both faces show the ad (as in Cycles), read unmirrored from behind", () => {
     expect(LED_GLSL_BOARDS).toContain("bool facesPitch");
     expect(LED_GLSL_BOARDS).toContain("dot( cameraB - pB, -outward )");
+    expect(LED_GLSL_BOARDS).toContain("if ( !facesPitch ) s = -s;");
+    expect(LED_EMISSIVE_GLSL).not.toContain("vec3( 0.0 )");
     expect(isLedBoard("M_LEDBoard.web")).toBe(true);
     expect(isLedBoard("M_BoardBack.web")).toBe(false);
   });

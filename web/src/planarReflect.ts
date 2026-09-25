@@ -18,7 +18,9 @@ import { isInside } from "./route";
  */
 /** gain: day and night strength (Cycles' day plaza shows only a faint sheen; at night the lit facade reads clearly). */
 /** v4: honed granite slabs (Cycles shows the joints and only a soft sheen at golden hour): gain and blur retuned. */
-export const PLANAR = { planeZ: 0.04, maxEyeZ: 80, scale: 0.5, gain: { day: 0.12, night: 0.4 }, minRough: 0.62, lodPerRough: 7, smear: 0.12 } as const;
+/** slabMean: linear albedo luminance of an average slab (granite 0.33 x paving tint ~0.8); a texel's reflection
+ * scales with (its luminance / slabMean)^2, so the rough joints go dark and each slab's tone shows at night. */
+export const PLANAR = { planeZ: 0.04, maxEyeZ: 80, scale: 0.5, gain: { day: 0.12, night: 0.3 }, minRough: 0.62, lodPerRough: 7, smear: 0.12, slabMean: 0.26 } as const;
 const PLANAR_RE = /^M_(Paving|Plaza)\b/;
 export const isPlanarMaterial = (name: string) => PLANAR_RE.test(name);
 /** Worth rendering: the eye is outside the bowl and low enough to see the plaza at a glancing angle. */
@@ -45,6 +47,10 @@ vec3 planarReflection( float roughness ) {
     s += textureLod( tReflect, uv + vec2( 0.0, r * ${PLANAR.smear.toFixed(3)} * t ), lod ).rgb * w; wsum += w;
   }
   return s / wsum * mix( ${PLANAR.gain.day.toFixed(2)}, ${PLANAR.gain.night.toFixed(2)}, uNight );
+}
+float slabMask( vec3 albedo ) {
+  float l = dot( albedo, vec3( 0.2126, 0.7152, 0.0722 ) ) / ${PLANAR.slabMean.toFixed(3)};
+  return clamp( l * l, 0.05, 1.8 );
 }
 #endif
 `;

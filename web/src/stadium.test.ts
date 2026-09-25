@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import * as THREE from "three";
 import { BLOOM } from "./lighting";
 import { BOARDS, LED_EMISSIVE_GLSL } from "./ledBoards";
-import { sailGlow, DUGOUT_GLASS, DUGOUT_GLASS_RE, FLOOD_LENS_MAX, LED_CELL, LED_COVER, LED_GLSL, LED_MAX, LED_R, setupStadiumMaterials } from "./stadium";
+import { sailGlow, PAVING_LIFT_M, PAVING_LIFT_RE, DUGOUT_GLASS, DUGOUT_GLASS_RE, FLOOD_LENS_MAX, LED_CELL, LED_COVER, LED_GLSL, LED_MAX, LED_R, setupStadiumMaterials } from "./stadium";
 import { splitByGroup, GROUND_ENV, OVERLAY_RE, SAIL_NIGHT_ENV, SAIL_RE, envIntensityOf, sailEnvIntensity, SAIL_COAT, SPEC_OCC, SAIL_NIGHT_E, lightsChunkFor, overlayOffset, soMinDefine, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
 
 it("patches three r186 lights_fragment_maps (lightmap blend, no diffuse IBL, env blend)", () => {
@@ -161,4 +161,12 @@ it("v4 dugout canopy glass is translucent and daylit, not the dark baked undersi
   expect(DUGOUT_GLASS.opacity).toBeLessThan(0.5);                 // still see-through
   expect(DUGOUT_GLASS.lmBoost).toBeGreaterThan(1);
   expect(DUGOUT_GLASS.emDay).toBeGreaterThan(DUGOUT_GLASS.emNight);  // milky by day, not a lamp at night
+});
+
+it("v4: paving (not the plaza disc) is lifted over the coplanar lawn by more than a quantization step (~4 cm)", () => {
+  expect(PAVING_LIFT_RE.test("M_Paving.web")).toBe(true);
+  expect(PAVING_LIFT_RE.test("M_Plaza.web")).toBe(false);   // the plaza disc runs under the pitch
+  expect(PAVING_LIFT_RE.test("M_Lawn.web")).toBe(false);
+  expect(PAVING_LIFT_M).toBeGreaterThan(0.04);
+  expect(PAVING_LIFT_M).toBeLessThan(0.1);
 });

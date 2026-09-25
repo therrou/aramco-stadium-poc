@@ -4,7 +4,7 @@ from webexport import budget
 def test_check_passes_and_fails():
     ok = {"triangles": 1_500_000, "first_load_mb": 30.0}
     assert budget.check(ok) == []
-    bad = {"triangles": 2_100_000, "first_load_mb": 36.0}
+    bad = {"triangles": 2_100_000, "first_load_mb": 47.0}   # v4 limit 46 MB
     msgs = budget.check(bad)
     assert len(msgs) == 2 and "triangles" in msgs[0]
 

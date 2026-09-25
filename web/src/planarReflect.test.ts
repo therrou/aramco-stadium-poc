@@ -16,7 +16,7 @@ describe("plaza reflection (v3, option 2)", () => {
   });
   it("replaces the sky reflection with the scene's mirror image, through the surface's own BRDF", () => {
     const out = patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps);
-    expect(out).toMatch(/#ifdef PLANAR_REFLECT\s*iblRadiance = mix\( iblRadiance, planarReflection\( material\.roughness \), uReflectOn \);/);
+    expect(out).toMatch(/#ifdef PLANAR_REFLECT\s*iblRadiance = mix\( iblRadiance, planarReflection\( material\.roughness \) \* slabMask\( diffuseColor\.rgb \), uReflectOn \);/);
     expect(PLANAR_GLSL).toContain("vec3 planarReflection( float roughness )");
     expect(PLANAR.gain.night).toBeGreaterThan(PLANAR.gain.day);
   });
@@ -27,4 +27,9 @@ it("final review 5: the mirror pass skips the bowl-only layer (seats, patches), 
   expect(r.cam.layers.isEnabled(0)).toBe(true);
   expect(r.cam.layers.isEnabled(BOWL_LAYER)).toBe(false);
   expect(r.cam.layers.isEnabled(NO_REFLECT_LAYER)).toBe(false);
+});
+
+it("v4: the mirror image is masked by the slab albedo (joints dark, slab tones vary)", () => {
+  expect(PLANAR_GLSL).toContain("float slabMask( vec3 albedo )");
+  expect(PLANAR.gain.night).toBeLessThanOrEqual(0.3);
 });

@@ -5,8 +5,8 @@ import * as THREE from "three";
  * (blue and green swooshes, white type) for "POWERED BY aramco", alternating with a separate white AKQA sign
  * (black serif logo), with a dark seam between signs, facing the pitch.
  * The boards are one double-sided plane (scripts/stadium/pitch.py: 0.95 m tall, 5 m off the lines, a loop with
- * a gap at the tunnel); the shader shows the ad on the side facing the pitch and a black, empty back to the
- * stands. The artwork is drawn at runtime into a canvas atlas (one row per panel); every SWAP_S seconds the
+ * a gap at the tunnel); the shader shows the ad on both faces (v4; the back used to be black and empty to the
+ * stands). The artwork is drawn at runtime into a canvas atlas (one row per panel); every SWAP_S seconds the
  * whole loop steps one panel, with a short wipe, like real boards changing.
  */
 /** sat: saturation boost before tone mapping (AgX desaturates bright emitters; real LED boards read saturated). */
@@ -31,8 +31,10 @@ export const RIBBON = { repeatM: 48, panels: 4, pxW: 1024, pxH: 80 } as const;
 export const ribbonTexture: { value: THREE.Texture | null } = { value: null };
 
 /**
- * GLSL (needs vWorldPosB, cameraPosition): the ad colour on the pitch side, black on the back. Reading
- * direction: seen from the pitch, u runs to the viewer's left, so the atlas is read with -u.
+ * GLSL (needs vWorldPosB, cameraPosition): the ad colour. Reading direction: seen from the pitch, u runs to
+ * the viewer's left, so the atlas is read with -u. v4 (user: as close to the Blender render as possible): the
+ * back shows the ad too, as in Cycles (from the stands the near boards read as a black line otherwise); from
+ * behind u is read unflipped, so the type is never mirrored.
  */
 export const LED_GLSL_BOARDS = /* glsl */ `
 uniform sampler2D uAds; uniform float uAdTime;
@@ -55,6 +57,7 @@ vec3 ledBoardColor( vec3 pB, out bool facesPitch ) {
   float s = -boardU( pB, outward ), v = pB.z / ${BOARDS.height.toFixed(2)};
   vec3 cameraB = vec3( cameraPosition.x, -cameraPosition.z, cameraPosition.y );
   facesPitch = dot( cameraB - pB, -outward ) > 0.0;
+  if ( !facesPitch ) s = -s;                               // seen from behind: read the atlas the other way
   float cyc = uAdTime / ${BOARDS.swapS.toFixed(1)}, shift = floor( cyc ), t = fract( cyc ) * ${BOARDS.swapS.toFixed(1)};
   // the wipe runs along the loop: each point switches when the wipe front passes it
   float wipe = smoothstep( ${(BOARDS.swapS - BOARDS.wipeS).toFixed(2)}, ${BOARDS.swapS.toFixed(2)}, t + 0.02 * fract( s / ${BOARDS.panel.toFixed(1)} ) * ${BOARDS.wipeS.toFixed(2)} );
@@ -65,8 +68,8 @@ vec3 ledBoardColor( vec3 pB, out bool facesPitch ) {
 }
 `;
 
-/** Replaces the board's emission: the ad in front, nothing behind; the surface itself is black either way. */
-export const LED_EMISSIVE_GLSL = "{ bool fp; vec3 ad = ledBoardColor( vWorldPosB, fp ); totalEmissiveRadiance *= fp ? ad : vec3( 0.0 ); }";
+/** Replaces the board's emission with the ad, on both faces (v4); the surface itself is black. */
+export const LED_EMISSIVE_GLSL = "{ bool fp; vec3 ad = ledBoardColor( vWorldPosB, fp ); totalEmissiveRadiance *= ad; }";
 
 // ---- the artwork (browser only) ----
 

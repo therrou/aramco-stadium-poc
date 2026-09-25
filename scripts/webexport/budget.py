@@ -1,7 +1,7 @@
 """Export budgets from the spec's Targets table."""
 import math
 
-TARGETS = {"triangles": 2_000_000, "first_load_mb": 35.0, "draw_calls": 250}
+TARGETS = {"triangles": 2_000_000, "first_load_mb": 46.0, "draw_calls": 250}   # v4: 35 -> 46 MB for the denser lightmaps (groups.ATLAS_LO)
 TREE_TRI_BUDGET = 350_000          # decision D9, lowered from 450k by ruling R14 (~2.0M tris in close views)
 SEAT_TRI_BUDGET = 25_000 * 24      # decision D6: <= 25k visible seats x 24 tris
 

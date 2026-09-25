@@ -40,6 +40,8 @@ export function polarLimit(p: Pose) {
 export type RigMode = "orbit" | "look";
 /** Seat view zoom range (hfov, deg). */
 export const LOOK_HFOV = [25, 90] as const;
+/** Seat view may look up at the roof and sails (orbit keeps MAX_POLAR, 5 deg above the horizon). */
+export const LOOK_MAX_POLAR = (165 * Math.PI) / 180;
 export const ZOOM_S = 0.35, AUTO_ORBIT_SPEED = 0.6, MAX_DISTANCE_M = 2500;
 /** Zoom buttons: orbit dollies toward the target; look (seat view) changes the fov so the eye stays in the seat. */
 export function zoomedPose(p: Pose, f: number, mode: RigMode): Pose {
@@ -76,11 +78,16 @@ export class CameraRig {
     c.minDistance = m === "orbit" ? MIN_DISTANCE_M : 0;
     c.rotateSpeed = m === "orbit" ? 1 : -0.35;
     if (m === "look") this.setAutoOrbit(false);
+    c.maxPolarAngle = m === "look" ? LOOK_MAX_POLAR : polarLimit(this.pose());
   }
   setAutoOrbit(on: boolean) { this.controls.autoRotate = on; this.controls.autoRotateSpeed = AUTO_ORBIT_SPEED; }
   /** Any drag or wheel on the canvas (OrbitControls "start"). */
   onUserInput(cb: () => void) { this.controls.addEventListener("start", cb); }
-  zoom(f: number) { return this.flyTo(zoomedPose(this.pose(), f, this.mode), this.exposure, ZOOM_S); }
+  /** Zooms from where the camera is going: pressed mid-flight, it must not strand the camera between poses. */
+  zoom(f: number) {
+    const base = this.flight?.to ?? this.pose(), exp = this.flight?.expTo ?? this.exposure;
+    return this.flyTo(zoomedPose(base, f, this.mode), exp, ZOOM_S);
+  }
   pose(): Pose { return { eye: toBlender(this.camera.position), target: toBlender(this.controls.target), hfov: this.hfov }; }
   private apply(p: Pose) {
     this.camera.position.copy(toThree(p.eye));
@@ -89,7 +96,7 @@ export class CameraRig {
     this.camera.fov = verticalFov(p.hfov, this.camera.aspect);
     this.camera.updateProjectionMatrix();
     this.camera.lookAt(this.controls.target);
-    this.controls.maxPolarAngle = polarLimit(p);
+    this.controls.maxPolarAngle = this.mode === "look" ? LOOK_MAX_POLAR : polarLimit(p);
   }
   /**
    * Starts from the current pose, so a click mid-flight re-targets smoothly (Review Focus 2).
@@ -101,10 +108,14 @@ export class CameraRig {
    */
   flyTo(to: Pose, exposure = this.exposure, seconds = FLIGHT_S) {
     this.flight?.done();
-    const damping = this.controls.dampingFactor;
-    this.controls.dampingFactor = 1;
-    this.controls.update();
-    this.controls.dampingFactor = damping;
+    // flush without the distance clamp: leaving seat view (target 0.1 m ahead) with orbit's 5 m minimum
+    // would otherwise push the eye ~5 m back before the flight starts (final review)
+    const c = this.controls, damping = c.dampingFactor, [minD, maxD] = [c.minDistance, c.maxDistance];
+    c.dampingFactor = 1;
+    c.minDistance = 0;
+    c.maxDistance = Infinity;
+    c.update();
+    [c.dampingFactor, c.minDistance, c.maxDistance] = [damping, minD, maxD];
     return new Promise<void>((done) => { this.flight = { from: this.pose(), to, expFrom: this.exposure, expTo: exposure, t: 0, seconds, done }; this.controls.enabled = false; });
   }
   jump(p: Pose, exposure = this.exposure) { this.apply(p); this.exposure = exposure; }

@@ -169,7 +169,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     if (!hit) return -1;
     if (!acceptPatchHit(hit.distance, probe.distance(a.stadium.scene, rig.camera, ndc))) return -1;   // final review 6
     const r = idx.get(patches.sectionOfFace(hit.faceIndex!));
-    return r ? nearestSeatToRay(table, r, toBlender(ray.ray.origin), toBlender(ray.ray.direction)) : -1;
+    return r ? nearestSeatToRay(table, r, toBlender(ray.ray.origin), toBlender(ray.ray.direction), toBlender(hit.point)) : -1;
   };
   const tooltip = new Tooltip(document.getElementById("tooltip")!);
   const dom = renderer.domElement;

@@ -158,3 +158,39 @@ describe("seat view look mode", () => {
     expect([c.enablePan, c.enableZoom, c.minDistance, c.rotateSpeed]).toEqual([true, true, MIN_DISTANCE_M, 1]);
   });
 });
+
+describe("final review fixes", () => {
+  const seat: Pose = { eye: [0, -60, 9.2], target: [0, -59.9, 9.18], hfov: 70 };   // look target 0.1 m ahead
+  const far: Pose = { eye: [-330, -470, 230], target: [-276, -392, 195], hfov: 46 };
+  const run = (rig: CameraRig, s: number) => { for (let i = 0; i < s * 60; i++) rig.update(1 / 60); };
+  it("leaving seat view starts the flight from the seat, not 5 m behind it (min distance clamp)", () => {
+    const rig = new CameraRig(stubDom());
+    rig.setMode("look");
+    rig.jump(seat);
+    rig.setMode("orbit");
+    rig.flyTo(far);
+    rig.update(1e-6);
+    expect(Math.hypot(...rig.pose().eye.map((v, k) => v - seat.eye[k]))).toBeLessThan(0.01);
+  });
+  it("zoom pressed during a flight lands on the flight's destination (Review Focus 2)", () => {
+    const rig = new CameraRig(stubDom());
+    rig.jump(far);
+    rig.setMode("look");
+    rig.flyTo(seat);
+    run(rig, 0.5);
+    rig.zoom(0.5);
+    run(rig, 2);
+    const p = rig.pose();
+    expect(Math.hypot(...p.eye.map((v, k) => v - seat.eye[k]))).toBeLessThan(0.01);
+    expect(p.hfov).toBeCloseTo(35, 6);
+  });
+  it("seat view can look up past the horizon", () => {
+    const rig = new CameraRig(stubDom());
+    rig.setMode("look");
+    rig.jump(seat);
+    expect(rig.controls.maxPolarAngle).toBeGreaterThanOrEqual((160 * Math.PI) / 180);
+    rig.setMode("orbit");
+    rig.jump(far);
+    expect(rig.controls.maxPolarAngle).toBeCloseTo(MAX_POLAR, 6);
+  });
+});

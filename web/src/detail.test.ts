@@ -63,3 +63,9 @@ describe("D5 ground detail and the podium's night glow", () => {
     expect(podiumGlow(3)).toBeLessThan(0.01 * PODIUM_GLOW.e);
   });
 });
+
+import { GROUND_MAP_GLSL } from "./detail";
+it("D5: ground textures are sampled twice (rotated, rescaled) and blended by a large noise so their tiling does not show", () => {
+  expect(GROUND_MAP_GLSL).toContain("#ifdef USE_MAP");
+  expect(GROUND_MAP_GLSL).toMatch(/texture2D\( map, antiTileUv\( vMapUv \) \)/);
+});

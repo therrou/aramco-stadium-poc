@@ -17,11 +17,16 @@ export function hemiOctCell([x, y, z]: V3, n: number): [number, number] {
 
 const IMPOSTOR_VS = /* glsl */ `
 uniform float uSize; uniform float uCenterZ; uniform float uFrames;
-varying vec2 vUv; varying vec2 vCell;
+varying vec2 vUv; varying vec2 vCell; varying vec2 vCellF;
 vec2 cellOf(vec3 d) {
   d.z = max(d.z, 0.0); d /= max(abs(d.x) + abs(d.y) + d.z, 1e-6);
   vec2 uv = vec2(d.x + d.y, d.x - d.y);
   return clamp(floor((uv + 1.0) * 0.5 * uFrames), 0.0, uFrames - 1.0);
+}
+// D9 (v3): continuous cell position, for blending the four nearest frames
+vec2 cellF(vec3 d) {
+  d.z = max(d.z, 0.0); d /= max(abs(d.x) + abs(d.y) + d.z, 1e-6);
+  return clamp((vec2(d.x + d.y, d.x - d.y) + 1.0) * 0.5 * uFrames - 0.5, 0.0, uFrames - 1.0);
 }
 void main() {
 #ifdef USE_INSTANCING
@@ -33,6 +38,7 @@ void main() {
   vec3 camL = inverse(mat3(w)) * (cameraPosition - c.xyz);            // tree-local, Y-up
   vec3 dB = normalize(vec3(camL.x, -camL.z, camL.y));                // to Blender local (Z-up)
   vCell = cellOf(dB);
+  vCellF = cellF(dB);
   float scale = length(w[0].xyz);
   vec3 right = normalize(vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]));
   vec3 up = normalize(vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]));
@@ -40,14 +46,17 @@ void main() {
   vUv = vec2(position.x + 0.5, position.y);
   gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
 }`;
-const IMPOSTOR_FS = /* glsl */ `
+export const IMPOSTOR_FS_SRC = /* glsl */ `
 uniform sampler2D uAtlas; uniform float uFrames; uniform vec3 uSun; uniform vec3 uAmbient;
-varying vec2 vUv; varying vec2 vCell;
+varying vec2 vUv; varying vec2 vCell; varying vec2 vCellF;
+vec4 frame(vec2 cell, vec2 uv) { vec4 t = texture2D(uAtlas, vec2((cell.x + uv.x) / uFrames, 1.0 - (cell.y + uv.y) / uFrames)); return vec4(t.rgb * t.a, t.a); }  // Task 12 convention; premultiplied for blending
 void main() {
   vec2 uv = clamp(vUv, 0.002, 0.998);                                 // no bleed into the neighbour frame
-  vec4 c = texture2D(uAtlas, vec2((vCell.x + uv.x) / uFrames, 1.0 - (vCell.y + uv.y) / uFrames));  // Task 12 convention
-  if (c.a < 0.5) discard;
-  gl_FragColor = vec4(c.rgb * (uAmbient + 0.19 * uSun), 1.0);                   // 0.19 ~ 0.6 (mean N.L) / PI, as treeLight
+  // D9 (v3): blend the four nearest view frames, so orbiting does not snap between them
+  vec2 c0 = floor(vCellF), f = vCellF - c0, c1 = min(c0 + 1.0, uFrames - 1.0);
+  vec4 c = mix(mix(frame(c0, uv), frame(vec2(c1.x, c0.y), uv), f.x), mix(frame(vec2(c0.x, c1.y), uv), frame(c1, uv), f.x), f.y);
+  if (c.a < 0.1) discard;
+  gl_FragColor = vec4(c.rgb / max(c.a, 1e-3) * (uAmbient + 0.19 * uSun), smoothstep(0.25, 0.6, c.a));  // 0.19 ~ 0.6 (mean N.L) / PI; alpha -> coverage
 }`;
 
 /** Impostor species from the material (node names are dropped by `gltf-transform instance`). */
@@ -67,7 +76,7 @@ export function setupTrees(gltf: GLTF, impostors: Record<string, Impostor>, u: T
       if (!im) { hide.push(m); return; }                              // atlas missing: drop far trees rather than grey quads
       m.material = new THREE.ShaderMaterial({
         uniforms: { uAtlas: { value: im.atlas }, uFrames: { value: im.frames }, uSize: { value: im.size }, uCenterZ: { value: im.centerZ }, uSun: u.uSun, uAmbient: u.uAmbient },
-        vertexShader: IMPOSTOR_VS, fragmentShader: IMPOSTOR_FS, side: THREE.DoubleSide,
+        vertexShader: IMPOSTOR_VS, fragmentShader: IMPOSTOR_FS_SRC, side: THREE.DoubleSide, alphaToCoverage: true,
       });
       m.frustumCulled = false;
     } else {

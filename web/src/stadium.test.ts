@@ -124,3 +124,11 @@ it("D5: the ground's night glow is part of the lights chunk it actually compiles
   expect(lightsChunkFor(chunk, true, false, "concrete")).not.toContain("podiumGlow");
   expect(lightsChunkFor(chunk, false, false, "ground")).toContain("podiumGlow");   // also without lightmaps
 });
+it("v3: surface textures get anisotropic filtering (grazing ground showed moire stripes)", () => {
+  const root = new THREE.Group(), tex = new THREE.Texture(), nrm = new THREE.Texture();
+  const m = new THREE.MeshStandardMaterial({ name: "M_Lawn.web", map: tex, normalMap: nrm });
+  root.add(new THREE.Mesh(new THREE.BufferGeometry(), m));
+  const shared = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: 16 }, uNight: { value: 0 }, uSoK: { value: specOccK(0) } };
+  setupStadiumMaterials(root, shared, false, false, 16);
+  expect([tex.anisotropy, nrm.anisotropy]).toEqual([8, 8]);
+});

@@ -117,7 +117,10 @@ vFloodPos = ( modelMatrix * floodW ).xyz;`);
 /** Tree material: outdoor light, and glTF BLEND leaves become alpha-tested (opaque pass, depth write). */
 export function patchTreeMaterial(m: THREE.MeshStandardMaterial, u: TreeUniforms) {
   if (m.transparent || m.alphaTest > 0) {
-    m.alphaTest = 0.5;
+    // D9 (v3): alpha-to-coverage with the scene's MSAA gives anti-aliased leaf edges; a low alpha test
+    // still drops the empty texels
+    m.alphaToCoverage = true;
+    m.alphaTest = 0.25;
     m.transparent = false;
     m.depthWrite = true;
   }

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { MAX_CHARTS, chartUniforms, chartsOfMesh, pitchLinesGlsl, type Chart } from "./pitchLines";
 import { STATE_NIGHT } from "./lightingState";
-import { BICUBIC_GLSL, CONCRETE_GLSL, GRASS_GLSL, GROUND_GLSL, NET, NET_GLSL, detailFor } from "./detail";
+import { BICUBIC_GLSL, CONCRETE_GLSL, GRASS_GLSL, GROUND_GLSL, GROUND_MAP_GLSL, NET, NET_GLSL, detailFor } from "./detail";
 
 const LM_RE = /vec4 lightMapTexel = texture2D\( lightMap, vLightMapUv \);\s*vec3 lightMapIrradiance = lightMapTexel\.rgb \* lightMapIntensity;/;
 const IBL_IRR_RE = /iblIrradiance \+= getIBLIrradiance\( geometryNormal \);/;
@@ -198,7 +198,7 @@ const DETAIL_MAP = {
   grass: "diffuseColor.rgb = grassAlbedo( vWorldPosB );",
   net: FLAT_NORMAL_B + `diffuseColor.rgb = vec3( ${NET.color.toFixed(2)} ); diffuseColor.a = netCoverage( netPlane( vWorldPosB, nB ) );`,
   concrete: FLAT_NORMAL_B + "diffuseColor.rgb *= concreteDetail( vWorldPosB, nB );",
-  ground: "diffuseColor.rgb *= groundDetail( vWorldPosB );",
+  ground: GROUND_MAP_GLSL + "diffuseColor.rgb *= groundDetail( vWorldPosB );",
 } as const;
 
 /** The lights chunk a stadium material compiles: patched or stock, the pitch lines' UVs, then any detail light. */
@@ -233,7 +233,10 @@ export function splitByGroup(root: THREE.Object3D) {
   return n;
 }
 
-export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUniforms, useLightmaps: boolean, reversedDepth = false) {
+/** v3: anisotropic filtering for the surface textures, capped at 8 (grazing ground showed moire stripes at 1). */
+export const MAX_ANISO = 8;
+
+export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUniforms, useLightmaps: boolean, reversedDepth = false, maxAniso = 1) {
   const coated = new Map<THREE.Material, THREE.MeshPhysicalMaterial>();
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
@@ -264,6 +267,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
     const lines = useLightmaps && lineCharts !== null && group === "pitch" && PITCH_LINES_RE.test(mat.name);
     const ex = mat.userData as { emDay?: number; emNight?: number; special?: string; tint?: number[] };
     const detail = detailFor(mat.name);
+    for (const t of [mat.map, mat.normalMap, mat.roughnessMap, mat.metalnessMap, mat.emissiveMap]) if (t) t.anisotropy = Math.min(MAX_ANISO, maxAniso);
     if (detail === "grass") mat.map = null;           // D1: the shader draws the grass; the 1024 px bake is not needed
     if (detail === "net") { mat.transparent = true; mat.depthWrite = false; mat.side = THREE.DoubleSide; mat.alphaTest = 0; }
     if (Array.isArray(ex.tint) && ex.tint.length === 3) mat.color.setRGB(ex.tint[0], ex.tint[1], ex.tint[2]);   // Task 13b (E): linear, may exceed 1

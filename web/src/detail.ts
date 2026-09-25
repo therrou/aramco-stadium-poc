@@ -127,11 +127,24 @@ vec3 groundDetail( vec3 pB ) {
   float grain = mix( 0.5, dNoise( p * 45.0 ), 1.0 - smoothstep( 0.006, 0.02, px ) );
   return vec3( 0.8 + 0.4 * m ) * ( 0.94 + 0.12 * grain );
 }
+// anti-tiling: a second lookup of the same texture, rotated 37 degrees and rescaled, blended in by a large noise
+vec2 antiTileUv( vec2 uv ) { const float c = 0.7986, s = 0.6018; return mat2( c, s, -s, c ) * uv * 0.61 + vec2( 0.31, 0.17 ); }
 vec3 podiumGlow( vec3 pB ) {
   float S = pow( pow( abs( pB.x / 138.0 ), 2.25 ) + pow( abs( pB.y / 121.0 ), 2.25 ), 1.0 / 2.25 );
   float g = S < 1.0 ? 0.0 : ${PODIUM_GLOW.e.toFixed(3)} * exp( -( S - 1.0 ) * ${OUTLINE_M.toFixed(1)} / ${PODIUM_GLOW.decay.toFixed(1)} );
   return g * vec3( ${PODIUM_GLOW.color.map((v) => v.toFixed(2)).join(", ")} );
 }
+`;
+
+/** D5: after map_fragment on ground materials; the tiled Poly Haven textures showed a regular repeat from above. */
+export const GROUND_MAP_GLSL = /* glsl */ `
+#ifdef USE_MAP
+{
+  vec4 t2 = texture2D( map, antiTileUv( vMapUv ) );
+  float k = smoothstep( 0.42, 0.58, dFbm( vec3( vWorldPosB.xy, 0.0 ), 0.05, 2, 0.0 ) );
+  diffuseColor.rgb = mix( diffuseColor.rgb, diffuse * t2.rgb, k );
+}
+#endif
 `;
 
 export type Detail = "grass" | "net" | "concrete" | "ground";

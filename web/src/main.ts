@@ -85,7 +85,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const useLightmaps = missing.length === 0;
   if (!useLightmaps && STATES.some((s) => Object.keys(a.lightmaps[s]).length > 0))
     console.warn(`Lighting: incomplete lightmap bake, using fallback lights. Missing: ${missing.join(", ")}`);
-  const groups = setupStadiumMaterials(a.stadium.scene, shared, useLightmaps, renderer.capabilities.reversedDepthBuffer);
+  const groups = setupStadiumMaterials(a.stadium.scene, shared, useLightmaps, renderer.capabilities.reversedDepthBuffer, renderer.capabilities.getMaxAnisotropy());
   const emissive = new Set<THREE.MeshStandardMaterial>();   // Set: the optimized glb shares materials between meshes
   a.stadium.scene.traverse((o) => {
     const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial;

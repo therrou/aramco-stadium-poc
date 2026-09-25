@@ -16,3 +16,4 @@ __pycache__/
 /graft/
 .venv/
 web/public/basis/
+.superpowers/

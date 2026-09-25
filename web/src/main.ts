@@ -3,7 +3,8 @@ import { missingCapabilities, probe } from "./capabilities";
 import { AssetError, assetJobs, collect, fetchManifest, makeLoaders, runJobs, type Assets } from "./loader";
 import { Perf, exposeViewerHooks } from "./perf";
 import { hideOverlay, showError, showFatal, showProgress, renderPanel } from "./ui";
-import { toBlender } from "./coords";
+import { toBlender, type V3 } from "./coords";
+import { imageStats, type Box } from "./frameStats";
 import { parseSeats, indexSections } from "./seatsData";
 import { mockAvailability } from "./availability";
 import { SeatField, visibleSections, SEAT_LOD_DIST } from "./seats";
@@ -105,7 +106,25 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   exposeViewerHooks({ get fps() { return perf.fps; }, info: renderer.info, scene, flyTo: (p: Pose) => rig.flyTo(p),
     setState: (s: State) => dispatch({ type: "lighting", lighting: s }),
     get night() { return lighting.t.night; }, tick: (dt = 1 / 60) => frame(dt),
-    renderer, composer, camera, rig, lighting, stadium: a.stadium.scene, assets: a });
+    renderer, composer, camera, rig, lighting, stadium: a.stadium.scene, assets: a,
+    /** v2 Task 1: metrics of the next rendered frame (drawing buffer is read in the same task as the render). */
+    stats: (box?: Box) => {
+      frame(0);
+      renderer.setRenderTarget(null);
+      const gl = renderer.getContext(), w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, px = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      return imageStats(px, w, h, box, true);
+    },
+    /** Dev server only: saves the next frame to renders/web_v2/<name>.png (toBlob snapshots the bitmap at call time). */
+    save: (name: string) => new Promise<string>((done) => {
+      frame(0);
+      renderer.domElement.toBlob((b) => fetch(`/__save?name=${encodeURIComponent(name)}`, { method: "POST", body: b }).then((r) => done(r.statusText || String(r.status))));
+    }),
+    /** Camera-nudge test: moves eye and target sideways (camera right) by `m` metres. */
+    nudge: (m: number) => {
+      const p = rig.pose(), off = toBlender(new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(m));
+      rig.jump({ eye: p.eye.map((v, k) => v + off[k]) as V3, target: p.target.map((v, k) => v + off[k]) as V3, hfov: p.hfov });
+    } });
 
   let app = { ...initialState, lighting: startState };
   const lightingChanged = (l: State) => lighting.request(l);

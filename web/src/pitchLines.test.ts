@@ -52,3 +52,8 @@ it("the lines' chunk routes every lightmap lookup through pitchLmUv", () => {
   expect(out.replaceAll("pitchLmUv( vWorldPosB, vLightMapUv )", "")).not.toContain("vLightMapUv");
   expect(pitchLinesGlsl(4)).toContain("uniform vec4 uChartBox[4]");
 });
+it("v3: goal posts take the grass lighting at their footprint (their own baked texels are black)", () => {
+  const g = pitchLinesGlsl(4);
+  expect(g).not.toContain("pB.z >");
+  expect(g).toContain("return own;");                 // off the grass charts they still fall back
+});

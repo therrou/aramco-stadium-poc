@@ -34,3 +34,29 @@ it("selected seat highlight pulses between 0.35 and 0.9 and hides with no seat",
   h.set(new THREE.Matrix4());
   expect(h.mesh.visible).toBe(true);
 });
+
+import { seatGeometryHi, SEAT_NEAR_M } from "./seats";
+describe("D7 moulded seat near the camera", () => {
+  it("about 150-200 triangles, same footprint as the block seat, contact shading in vertex colours", () => {
+    const g = seatGeometryHi(), tris = (g.index ? g.index.count : g.attributes.position.count) / 3;
+    expect(tris).toBeGreaterThanOrEqual(120);
+    expect(tris).toBeLessThanOrEqual(200);
+    g.computeBoundingBox(); const lo = seatGeometry(); lo.computeBoundingBox();
+    const b = g.boundingBox!, l = lo.boundingBox!;
+    expect(b.max.z - b.min.z).toBeLessThanOrEqual(l.max.z - l.min.z + 1e-6);   // no wider than its seat slot
+    expect(b.max.y).toBeLessThan(1.0);
+    const c = g.getAttribute("color");
+    let min = 1, max = 0; for (let i = 0; i < c.count; i++) { min = Math.min(min, c.getX(i)); max = Math.max(max, c.getX(i)); }
+    expect(min).toBeLessThan(0.7);                                          // undersides and stem darker
+    expect(max).toBe(1);
+  });
+  it("near sections draw the moulded seat, the rest the block; each seat in exactly one mesh", () => {
+    const t = { count: 3, section: new Uint16Array([101, 101, 201]), row: new Uint8Array(3), seat: new Uint16Array(3), pos: new Float32Array(9), yaw: new Float32Array(3) };
+    const f = new SeatField(t, new Map([[101, { start: 0, end: 2 }], [201, { start: 2, end: 3 }]]), doc.sections);
+    f.setVisibleSections(new Set([101, 201]), new Set([101]));
+    expect([f.near.count, f.mesh.count]).toEqual([2, 1]);
+    f.setVisibleSections(new Set([101, 201]), new Set());
+    expect([f.near.count, f.mesh.count]).toEqual([0, 3]);
+    expect(SEAT_NEAR_M).toBeGreaterThan(20);
+  });
+});

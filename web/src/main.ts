@@ -7,7 +7,7 @@ import { toBlender, type V3 } from "./coords";
 import { imageStats, type Box } from "./frameStats";
 import { parseSeats, indexSections, SeatDirectory, parseSeatParam, formatSeat, type SeatRef } from "./seatsData";
 import type { Tier } from "./tiers";
-import { SeatField, SeatHighlight, visibleSections, SEAT_LOD_DIST } from "./seats";
+import { SeatField, SeatHighlight, visibleSections, SEAT_LOD_DIST, SEAT_NEAR_M } from "./seats";
 import { SectionPatches } from "./sectionPatches";
 import { CameraRig, ZOOM_S, pivotOf } from "./camera";
 import { cameraPose, seatViewPose, SEAT_EXP, type Pose } from "./flyto";
@@ -97,7 +97,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const tierOf = new Map(a.sections.sections.map((s) => [Number(s.id), s.tier as Tier]));
   const patches = new SectionPatches(table, idx, lighting.outdoor, (id) => tierOf.get(id));
   const highlight = new SeatHighlight();
-  scene.add(seats.mesh, patches.mesh, highlight.mesh);
+  scene.add(seats.mesh, seats.near, patches.mesh, highlight.mesh);
   if (a.trees) { setupTrees(a.trees, a.impostors, lighting.outdoor); scene.add(a.trees.scene); }
   const composer = makeComposer(renderer, scene, camera);
   const perf = new Perf(params.has("stats"));
@@ -206,7 +206,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     }
     const focus = app.view.kind === "seat" ? app.view.seat.section : -1;
     const vis = visibleSections(toBlender(camera.position), a.sections.sections, SEAT_LOD_DIST, focus);
-    seats.setVisibleSections(vis);
+    seats.setVisibleSections(vis, visibleSections(toBlender(camera.position), a.sections.sections, SEAT_NEAR_M, focus));
     patches.setHidden(vis);
     highlight.update(now / 1000);
     lighting.update(dt, rig.exposure, camera);

@@ -42,3 +42,14 @@ export async function flightFrames(prefix, act, every = 12) {
   await v.save(`${prefix}_${String(n++).padStart(2, "0")}`);
   return `${n} frames over ${(i / 60).toFixed(2)} s`;
 }
+
+/** v3: jumps to a named Blender camera (orbit pivot as in the app) in a state and saves the frame. */
+export async function shot(name, cam, state, nudge) {
+  const v = window.__viewer, c = v.assets.cameras[cam];
+  v.rig.jump({ eye: c.eye, target: c.target, hfov: c.hfov }, c.exposure);
+  if (nudge) v.rig.jump(nudge(v.rig.pose()), c.exposure);
+  v.setState(state);
+  for (let k = 0; k < 10; k++) v.tick(0.5);
+  await new Promise((r) => setTimeout(r, 200));
+  return v.save(name);
+}

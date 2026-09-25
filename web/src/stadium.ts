@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { MAX_CHARTS, chartUniforms, chartsOfMesh, pitchLinesGlsl, type Chart } from "./pitchLines";
 import { STATE_NIGHT } from "./lightingState";
+import { BICUBIC_GLSL, CONCRETE_GLSL, GRASS_GLSL, NET, NET_GLSL, detailFor } from "./detail";
 
 const LM_RE = /vec4 lightMapTexel = texture2D\( lightMap, vLightMapUv \);\s*vec3 lightMapIrradiance = lightMapTexel\.rgb \* lightMapIntensity;/;
 const IBL_IRR_RE = /iblIrradiance \+= getIBLIrradiance\( geometryNormal \);/;
@@ -33,7 +34,7 @@ export function specOccK(n: number) {
 export function patchLightsChunk(chunk: string) {
   for (const re of [LM_RE, IBL_IRR_RE, IBL_RAD_RE, COAT_RAD_RE]) if (!re.test(chunk)) throw new Error(`three.js lights_fragment_maps changed: ${re}`);
   return chunk
-    .replace(LM_RE, `vec3 lightMapIrradiance = mix( rgbmDecode( texture2D( lightMap, vLightMapUv ) ), rgbmDecode( texture2D( uLmB, vLightMapUv ) ), uLmBlend ) * lightMapIntensity;`)
+    .replace(LM_RE, `vec3 lightMapIrradiance = mix( rgbmDecode( texBicubic( lightMap, vLightMapUv ) ), rgbmDecode( texBicubic( uLmB, vLightMapUv ) ), uLmBlend ) * lightMapIntensity;`)
     .replace(IBL_IRR_RE, "")
     .replace(IBL_RAD_RE, `#ifdef USE_LIGHTMAP
 		float lmSo = lmSpecOcc( lightMapIrradiance );
@@ -49,6 +50,7 @@ uniform sampler2D uLmB; uniform float uLmBlend; uniform float uRgbmRange;
 uniform sampler2D uEnvB; uniform float uEnvBlend; uniform float uNight;
 varying vec3 vWorldPosB;
 vec3 rgbmDecode( vec4 c ) { return c.rgb * c.a * uRgbmRange; }
+${BICUBIC_GLSL}
 uniform float uSoK;
 float lmSpecOcc( vec3 e ) { return clamp( dot( e, vec3( 0.2126, 0.7152, 0.0722 ) ) / uSoK, SO_MIN, 1.0 ); }
 #if defined( USE_ENVMAP ) && defined( ENVMAP_TYPE_CUBE_UV )
@@ -163,6 +165,15 @@ export function toCoatedSail(m: THREE.MeshStandardMaterial) {
 export const FLOOD_LENS_RE = /^M_FloodLens\b/;
 export const FLOOD_LENS_MAX = 30;
 
+/** Spec v3 part 2: the detail shaders (detail.ts) and what each does after the albedo map. */
+const FLAT_NORMAL_B = "vec3 nB = normalize( cross( dFdx( vWorldPosB ), dFdy( vWorldPosB ) ) );\n";
+const DETAIL_GLSL = { grass: GRASS_GLSL, net: NET_GLSL, concrete: CONCRETE_GLSL } as const;
+const DETAIL_MAP = {
+  grass: "diffuseColor.rgb = grassAlbedo( vWorldPosB );",
+  net: FLAT_NORMAL_B + `diffuseColor.rgb = vec3( ${NET.color.toFixed(2)} ); diffuseColor.a = netCoverage( netPlane( vWorldPosB, nB ) );`,
+  concrete: FLAT_NORMAL_B + "diffuseColor.rgb *= concreteDetail( vWorldPosB, nB );",
+} as const;
+
 /** Final review 4: flat pitch lines take their lightmap UV from the grass charts (see pitchLines.ts). */
 export const PITCH_LINES_RE = /^M_LineWhite\b/;
 export const PITCH_GRASS_RE = /^M_Grass\b/;
@@ -219,6 +230,9 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
     const group = groupOf(o);
     const lines = useLightmaps && lineCharts !== null && group === "pitch" && PITCH_LINES_RE.test(mat.name);
     const ex = mat.userData as { emDay?: number; emNight?: number; special?: string; tint?: number[] };
+    const detail = detailFor(mat.name);
+    if (detail === "grass") mat.map = null;           // D1: the shader draws the grass; the 1024 px bake is not needed
+    if (detail === "net") { mat.transparent = true; mat.depthWrite = false; mat.side = THREE.DoubleSide; mat.alphaTest = 0; }
     if (Array.isArray(ex.tint) && ex.tint.length === 3) mat.color.setRGB(ex.tint[0], ex.tint[1], ex.tint[2]);   // Task 13b (E): linear, may exceed 1
     if (FLOOD_LENS_RE.test(mat.name)) {
       if (typeof ex.emNight === "number") ex.emNight = Math.min(ex.emNight, FLOOD_LENS_MAX);
@@ -244,11 +258,14 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
         .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + soMinDefine(ex.special) + PARS + (ex.special === "sailLeds" ? LED_GLSL : "")
           + (lines ? pitchLinesGlsl(lineCharts!.length) : ""))
         .replace("#include <lights_fragment_maps>", useLightmaps ? (lines ? pitchLinesChunk(chunk) : chunk) : THREE.ShaderChunk.lights_fragment_maps);
+      if (detail) s.fragmentShader = s.fragmentShader
+        .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + DETAIL_GLSL[detail])
+        .replace("#include <map_fragment>", "#include <map_fragment>\n" + DETAIL_MAP[detail]);
       if (ex.special === "sailLeds")
         s.fragmentShader = s.fragmentShader.replace("#include <emissivemap_fragment>",
           "#include <emissivemap_fragment>\ntotalEmissiveRadiance = min( totalEmissiveRadiance * sailLeds( vWorldPosB ), vec3( " + LED_MAX.toFixed(2) + " ) );");
     };
-    mat.customProgramCacheKey = () => `stadium-${useLightmaps}-${ex.special ?? ""}${lines ? `-lines${lineCharts!.length}` : ""}`;
+    mat.customProgramCacheKey = () => `stadium-${useLightmaps}-${ex.special ?? ""}${lines ? `-lines${lineCharts!.length}` : ""}-${detail ?? ""}`;
     mat.needsUpdate = true;
   });
   return byGroup;

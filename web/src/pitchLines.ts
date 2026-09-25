@@ -7,9 +7,9 @@ import * as THREE from "three";
  * lines. The lines lie 1 cm above the grass, whose lightmap charts are planar (four quadrant quads,
  * seams at x = 0 and y = 0). Flat line fragments therefore sample the grass lightmap at their own
  * position instead: per fragment, so a line straddling a chart seam (the halfway line sits on x = 0)
- * picks the right chart on each side. No rebake; goal posts (above LINE_MAX_Z) keep their own UVs.
+ * picks the right chart on each side. No rebake. v3: the goal posts (same material) use the grass lighting at their footprint too: their own
+ * baked texels came out black (12 cm tubes).
  */
-export const LINE_MAX_Z = 0.05;
 export const MAX_CHARTS = 4;
 
 /** Affine chart: uv = (dot(u, [x, y, 1]), dot(v, [x, y, 1])) on the box [x0, y0, x1, y1] (Blender XY). */
@@ -72,12 +72,11 @@ export function chartsOfMesh(mesh: THREE.Mesh): Chart[] {
   return chartsFromTriangles(tris);
 }
 
-/** GLSL: lightmap UV for a line fragment; falls back to the mesh's own UV off the charts or above LINE_MAX_Z. */
+/** GLSL: lightmap UV for a line or goal-post fragment; falls back to the mesh's own UV off the charts. */
 export function pitchLinesGlsl(n: number) {
   return /* glsl */ `
 uniform vec4 uChartBox[${n}]; uniform vec3 uChartU[${n}]; uniform vec3 uChartV[${n}];
 vec2 pitchLmUv( vec3 pB, vec2 own ) {
-  if ( pB.z > ${LINE_MAX_Z.toFixed(3)} ) return own;
   for ( int i = 0; i < ${n}; i ++ ) {
     vec4 b = uChartBox[ i ];
     if ( all( greaterThanEqual( pB.xy, b.xy - 1e-4 ) ) && all( lessThanEqual( pB.xy, b.zw + 1e-4 ) ) )

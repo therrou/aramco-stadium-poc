@@ -1,7 +1,7 @@
 """Frame metrics, twin of web/src/frameStats.ts: 8-bit sRGB, mean Rec.709 luma, clipped = max channel >= CLIP.
 
     python -m webexport.framestats stats a.png b.png [--box x0,y0,x1,y1]
-    python -m webexport.framestats pair ref.png web.png out.jpg      # side by side, ref left
+    python -m webexport.framestats pair ref.png web.png out.jpg          # side by side, ref left
     python -m webexport.framestats pop a.png b.png [--box x0,y0,x1,y1]   # camera-nudge popping
 """
 import json
@@ -12,9 +12,9 @@ import numpy as np
 from PIL import Image
 
 CLIP = 250
-
-
 POP_LUMA = 160
+POP_SHIFT = 3
+LUMA = np.array([0.2126, 0.7152, 0.0722])
 
 
 def _crop(rgb, box):
@@ -25,18 +25,52 @@ def _crop(rgb, box):
 
 def image_stats(rgb, box=(0, 0, 1, 1)):
     a = _crop(rgb, box)
-    luma = a @ np.array([0.2126, 0.7152, 0.0722])
-    return {"mean": float(luma.mean()), "clipped": float((a.max(axis=2) >= CLIP).mean())}
+    return {"mean": float((a @ LUMA).mean()), "clipped": float((a.max(axis=2) >= CLIP).mean())}
+
+
+def _dilate(m, r=POP_SHIFT):
+    out = m.copy()
+    for dy in range(-r, r + 1):
+        for dx in range(-r, r + 1):
+            out |= np.roll(np.roll(m, dy, 0), dx, 1)
+    return out
+
+
+POP_SEARCH = 40
+
+
+def _shift_cost(la, lb, dy, dx, m):
+    """Mean |la - lb shifted by (dy, dx)| over the interior (margin m)."""
+    h, w = la.shape
+    return np.abs(la[m:h - m, m:w - m] - lb[m + dy:h - m + dy, m + dx:w - m + dx]).mean()
+
+
+def _align(la, lb, search=POP_SEARCH):
+    """Integer (dy, dx) such that lb[y + dy, x + dx] best matches la[y, x]: coarse at 1/4 scale, then refined."""
+    k = 4
+    h, w = (la.shape[0] // k) * k, (la.shape[1] // k) * k
+    small = [x[:h, :w].reshape(h // k, k, w // k, k).mean(axis=(1, 3)) for x in (la, lb)]
+    s = search // k
+    cy, cx = min(((dy, dx) for dy in range(-s, s + 1) for dx in range(-s, s + 1)),
+                 key=lambda d: _shift_cost(small[0], small[1], d[0], d[1], s))
+    return min(((cy * k + dy, cx * k + dx) for dy in range(-k, k + 1) for dx in range(-k, k + 1)),
+               key=lambda d: _shift_cost(la, lb, d[0], d[1], search + k))
 
 
 def popping(a, b, box=(0, 0, 1, 1)):
-    """Camera-nudge test: share of bright pixels (luma > POP_LUMA) that are bright in only one frame.
-    A 1.8 m nudge seen from hundreds of metres moves geometry a few pixels at most, so a halo that
-    appears or vanishes (an LED hit or missed) dominates this; 0 = stable, 1 = every light popped."""
-    wts = np.array([0.2126, 0.7152, 0.0722])
-    la, lb = (_crop(x, box) @ wts > POP_LUMA for x in (a, b))
+    """Camera-nudge test: frame b is aligned to a (best global integer shift: the nudge's parallax), then
+    popping = share of bright pixels (luma > POP_LUMA) with no bright pixel within POP_SHIFT px in the other
+    frame, over the interior. A halo that appears or vanishes (an LED hit or missed) counts; residual
+    parallax of a pixel or two does not. 0 = stable, 1 = every light popped."""
+    ya, yb = (_crop(x, box) @ LUMA for x in (a, b))
+    dy, dx = _align(ya, yb)
+    m = POP_SEARCH + 4
+    h, w = ya.shape
+    la = ya[m:h - m, m:w - m] > POP_LUMA
+    lb = yb[m + dy:h - m + dy, m + dx:w - m + dx] > POP_LUMA
     union = (la | lb).sum()
-    return float((la ^ lb).sum() / union) if union else 0.0
+    popped = (la & ~_dilate(lb)).sum() + (lb & ~_dilate(la)).sum()
+    return float(popped / union) if union else 0.0
 
 
 def load(path):

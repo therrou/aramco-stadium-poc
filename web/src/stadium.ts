@@ -57,14 +57,31 @@ vec3 getIBLRadianceB( const in vec3 v, const in vec3 n, const in float r ) { ret
 #endif
 `;
 
-/** Decision D7: sail LED points (shell._skin_material): 1.1 m cells, r = 0.055 m, fade 36..50 m, 40 * n. */
+/** A3 (v2): mean share of a surface covered by the LED dots (sphere r in a cell s: (4/3) pi r^3 / s^3). */
+export const LED_COVER = (4 / 3) * Math.PI * 0.055 ** 3 / 1.1 ** 3;
+/** A3 (v2): LED radiance clamp, below BLOOM.threshold (lighting.ts), so no LED blooms on its own. */
+export const LED_MAX = 10.0;
+
+/**
+ * Decision D7: sail LED points (shell._skin_material): 1.1 m cells, r = 0.055 m, fade 36..50 m, 40 * n.
+ * A3 (v2): the 5.5 cm dots are far below a pixel from most views, so a hard step hit or missed each dot
+ * per frame and each hit bloomed ("lights re-render" when the camera moved). The dot now grows to the
+ * pixel footprint with its radiance scaled to keep its energy ((r0/r)^3, the plane's mean cut through a
+ * sphere), edges are smoothstepped over one pixel, and once a pixel spans about a cell it fades to the
+ * cells' mean radiance: LED_COVER x lit share (1 - fade) x mean brightness 1.05.
+ */
 export const LED_GLSL = /* glsl */ `
 vec3 h33( vec3 p ) { p = fract( p * vec3( 0.1031, 0.1030, 0.0973 ) ); p += dot( p, p.yxz + 33.33 ); return fract( ( p.xxy + p.yxx ) * p.zyx ); }
 float sailLeds( vec3 pB ) {
   vec3 c = floor( pB / 1.1 ), h = h33( c ), q = ( c + h ) * 1.1;
-  float dot_ = step( length( pB - q ), 0.055 );
   float fade = mix( 0.55, 1.01, clamp( ( pB.z - 36.0 ) / 14.0, 0.0, 1.0 ) );
-  return dot_ * step( fade, h.x ) * ( h.y * 1.5 + 0.3 );
+  float lit = step( fade, h.x ) * ( h.y * 1.5 + 0.3 );
+  float px = max( length( fwidth( pB ) ), 1e-5 );
+  float r = max( 0.055, 0.5 * px );
+  float k = 0.055 / r;
+  float dot_ = ( 1.0 - smoothstep( r - 0.5 * px, r + 0.5 * px, length( pB - q ) ) ) * k * k * k;
+  float avg = ${LED_COVER.toExponential(4)} * max( 1.0 - fade, 0.0 ) * 1.05;
+  return mix( dot_ * lit, avg, smoothstep( 0.3, 0.9, px / 1.1 ) );
 }
 `;
 
@@ -202,7 +219,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
         .replace("#include <lights_fragment_maps>", useLightmaps ? (lines ? pitchLinesChunk(chunk) : chunk) : THREE.ShaderChunk.lights_fragment_maps);
       if (ex.special === "sailLeds")
         s.fragmentShader = s.fragmentShader.replace("#include <emissivemap_fragment>",
-          "#include <emissivemap_fragment>\ntotalEmissiveRadiance *= sailLeds( vWorldPosB );");
+          "#include <emissivemap_fragment>\ntotalEmissiveRadiance = min( totalEmissiveRadiance * sailLeds( vWorldPosB ), vec3( " + LED_MAX.toFixed(2) + " ) );");
     };
     mat.customProgramCacheKey = () => `stadium-${useLightmaps}-${ex.special ?? ""}${lines ? `-lines${lineCharts!.length}` : ""}`;
     mat.needsUpdate = true;

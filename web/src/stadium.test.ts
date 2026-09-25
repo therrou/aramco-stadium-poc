@@ -1,5 +1,7 @@
 import { expect, it } from "vitest";
 import * as THREE from "three";
+import { BLOOM } from "./lighting";
+import { LED_COVER, LED_GLSL, LED_MAX } from "./stadium";
 import { splitByGroup, GROUND_ENV, OVERLAY_RE, SAIL_NIGHT_ENV, SAIL_RE, envIntensityOf, sailEnvIntensity, SAIL_COAT, SPEC_OCC, overlayOffset, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
 
 it("patches three r186 lights_fragment_maps (lightmap blend, no diffuse IBL, env blend)", () => {
@@ -75,4 +77,15 @@ it("A1: the occlusion scale K follows the lighting state", () => {
   expect(specOccK(1)).toBe(SPEC_OCC.k.night);
   expect(specOccK(0.3)).toBeCloseTo((SPEC_OCC.k.day + SPEC_OCC.k.golden) / 2, 9);
   expect(SPEC_OCC.min).toBeGreaterThan(0);
+});
+it("A3: LED dots are pixel-footprint aware, never a hard step", () => {
+  expect(LED_GLSL).toContain("fwidth( pB )");
+  expect(LED_GLSL).not.toMatch(/step\( length\(/);
+  expect(LED_GLSL).toContain(LED_COVER.toExponential(4));
+});
+it("A3: a plane crosses r=0.055 m dots in 1.1 m cells over (4/3) pi r^3 / 1.1^3 of its area", () => {
+  expect(LED_COVER).toBeCloseTo((4 / 3) * Math.PI * 0.055 ** 3 / 1.1 ** 3, 12);
+});
+it("A3: LED radiance stays below the bloom threshold, so single LEDs never bloom", () => {
+  expect(LED_MAX).toBeLessThan(BLOOM.threshold);
 });

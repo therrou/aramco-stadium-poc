@@ -13,8 +13,10 @@ Branch `web-viewer-v2`. Plan: `docs/superpowers/plans/2026-09-25-web-viewer-v2.m
 - Reference metrics and side-by-sides: `PYTHONPATH=scripts .venv/bin/python -m webexport.framestats stats|pair|pop`
   (same definitions as `web/src/frameStats.ts`, pinned by `tests/webexport/test_framestats.py`).
 - Camera-nudge test: `CAM_Aerial_Dusk`, night; frame A, `__viewer.nudge(1.8)` (1.8 m to camera right), frame B.
-  Popping = share of bright pixels (luma > 160) lit in only one of the two frames, in the stadium box
-  (0.3, 0.3)–(0.8, 0.65). Parallax at that distance is a few pixels, so halos that appear or vanish dominate it.
+  Popping (`framestats.popping`): frame B is aligned to A by the best global integer shift (the nudge moves
+  the stadium ~15 px at 3840 px), then it is the share of bright pixels (luma > 160) with no bright pixel within
+  3 px in the other frame, in the stadium box (0.3, 0.3)–(0.8, 0.65). Halos that appear or vanish count, and
+  residual parallax does not.
 
 ## v1 baseline (before any Stage A change)
 
@@ -30,7 +32,7 @@ Branch `web-viewer-v2`. Plan: `docs/superpowers/plans/2026-09-25-web-viewer-v2.m
 | CAM_Seat_212 | golden | 140.4 | 152.5 | 1.09 | 0.20 % | 0.90 % |
 | CAM_Seat_212 | night | 171.9 | 150.0 | 0.87 | 8.12 % | 4.16 % |
 
-Nudge popping (v1): **0.204**.
+Nudge popping (v1): **0.0115**.
 
 Visual notes (v1 side-by-sides): whole-frame means are close from far away, but the web frames look milky and
 low in contrast. The sails and the podium read as uniform bright chrome (Approach day), and the pitch and seats
@@ -42,3 +44,9 @@ LEDs where Cycles shows dark skin with a dense stipple. The mock "taken" seats s
 Means: Aerial_Dusk 151.9 / 100.7 / 50.5, Approach 187.2 / 133.0 / 76.3, Seat_212 151.4 / 152.1 / 150.0 (day / golden / night).
 No shader errors. Podium glass under the canopy is darker (occluded). The sunlit sails are unchanged, since their
 irradiance is above K; they still read as chrome where Cycles shows pearl white (A2/A5 and Task 8).
+
+## After A2/A5 and A3 (LED coverage)
+
+Nudge popping at `CAM_Aerial_Dusk` night: **0.0016** (v1 0.0115, 7× lower). In the crops, the v1 frames show large
+bloom halos at different places in A and B. After A3 the sails carry a dense, fine stipple that is the same in both
+frames, much like the Cycles night reference. Night means: Aerial_Dusk 49.6 (Cycles 61.2), Approach 71.9 (121.5).

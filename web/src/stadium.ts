@@ -140,6 +140,14 @@ export function toCoatedSail(m: THREE.MeshStandardMaterial) {
   return p;
 }
 
+/**
+ * A4 (v2): M_FloodLens emits 120 at night (glb emNight) against a bloom threshold of 12, and double-sided
+ * lenses showed their backs too: a ring of halos (9 % of the roof-glow area clipped vs 3 % in Cycles).
+ * The viewer caps the lens and draws its front only. Tuned in Task 8.
+ */
+export const FLOOD_LENS_RE = /^M_FloodLens\b/;
+export const FLOOD_LENS_MAX = 30;
+
 /** Final review 4: flat pitch lines take their lightmap UV from the grass charts (see pitchLines.ts). */
 export const PITCH_LINES_RE = /^M_LineWhite\b/;
 export const PITCH_GRASS_RE = /^M_Grass\b/;
@@ -197,6 +205,10 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
     const lines = useLightmaps && lineCharts !== null && group === "pitch" && PITCH_LINES_RE.test(mat.name);
     const ex = mat.userData as { emDay?: number; emNight?: number; special?: string; tint?: number[] };
     if (Array.isArray(ex.tint) && ex.tint.length === 3) mat.color.setRGB(ex.tint[0], ex.tint[1], ex.tint[2]);   // Task 13b (E): linear, may exceed 1
+    if (FLOOD_LENS_RE.test(mat.name)) {
+      if (typeof ex.emNight === "number") ex.emNight = Math.min(ex.emNight, FLOOD_LENS_MAX);
+      mat.side = THREE.FrontSide;
+    }
     mat.userData.lmB = { value: null as THREE.Texture | null };
     mat.lightMapIntensity = Math.PI;        // Cycles diffuse bake is E/π; three multiplies by albedo/π
     const env = envIntensityOf(mat.name);

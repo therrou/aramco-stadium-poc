@@ -50,3 +50,8 @@ irradiance is above K; they still read as chrome where Cycles shows pearl white 
 Nudge popping at `CAM_Aerial_Dusk` night: **0.0016** (v1 0.0115, 7× lower). In the crops, the v1 frames show large
 bloom halos at different places in A and B. After A3 the sails carry a dense, fine stipple that is the same in both
 frames, much like the Cycles night reference. Night means: Aerial_Dusk 49.6 (Cycles 61.2), Approach 71.9 (121.5).
+
+## After A4 (flood lens cap 30, front side only)
+
+The lenses are still visible from inside the bowl (`CAM_Bowl` night), so FrontSide faces the pitch. Clipped share at
+`CAM_Aerial_Dusk` night went from 2.81 % to 2.49 % (Cycles 2.10 %). Roof-glow box tuning is in Task 8.

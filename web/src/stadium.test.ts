@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import * as THREE from "three";
 import { BLOOM } from "./lighting";
-import { LED_COVER, LED_GLSL, LED_MAX } from "./stadium";
+import { FLOOD_LENS_MAX, LED_COVER, LED_GLSL, LED_MAX, setupStadiumMaterials } from "./stadium";
 import { splitByGroup, GROUND_ENV, OVERLAY_RE, SAIL_NIGHT_ENV, SAIL_RE, envIntensityOf, sailEnvIntensity, SAIL_COAT, SPEC_OCC, overlayOffset, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
 
 it("patches three r186 lights_fragment_maps (lightmap blend, no diffuse IBL, env blend)", () => {
@@ -88,4 +88,17 @@ it("A3: a plane crosses r=0.055 m dots in 1.1 m cells over (4/3) pi r^3 / 1.1^3 
 });
 it("A3: LED radiance stays below the bloom threshold, so single LEDs never bloom", () => {
   expect(LED_MAX).toBeLessThan(BLOOM.threshold);
+});
+it("A4: flood lens night emission is capped and the lens is single-sided", () => {
+  const root = new THREE.Group();
+  const lens = new THREE.MeshStandardMaterial({ name: "M_FloodLens.web", side: THREE.DoubleSide });
+  lens.userData = { emDay: 0, emNight: 120 };
+  const other = new THREE.MeshStandardMaterial({ name: "M_Glow.web" });
+  other.userData = { emDay: 0, emNight: 120 };
+  root.add(new THREE.Mesh(new THREE.BufferGeometry(), lens), new THREE.Mesh(new THREE.BufferGeometry(), other));
+  const shared = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: 16 }, uNight: { value: 0 }, uSoK: { value: specOccK(0) } };
+  setupStadiumMaterials(root, shared, false);
+  expect(lens.userData.emNight).toBe(FLOOD_LENS_MAX);
+  expect(lens.side).toBe(THREE.FrontSide);
+  expect(other.userData.emNight).toBe(120);
 });

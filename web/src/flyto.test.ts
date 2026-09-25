@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { sectionFraming, verticalFov, pathPoint } from "./flyto";
+import { seatViewPose, verticalFov, pathPoint, SEAT_EYE_M, SEAT_HFOV, SEAT_LOOK_M } from "./flyto";
 import { visibleSections, SEAT_LOD_DIST } from "./seats";
 import type { SectionsDoc } from "./loader";
 
@@ -14,19 +14,20 @@ describe("fov (Review Focus 3)", () => {
   });
 });
 
-describe("section framing (decision D3: zoom to the area)", () => {
-  it("looks at the section from inside the bowl, above it", () => {
-    for (const s of doc.sections) {
-      const f = sectionFraming(s);
-      expect(Math.hypot(f.eye[0], f.eye[1])).toBeLessThan(Math.hypot(s.centroid[0], s.centroid[1]));
-      expect(f.eye[2]).toBeGreaterThan(s.centroid[2]);
-      expect(f.target).toEqual(s.centroid);
-    }
+describe("seat view pose (spec part 2)", () => {
+  it("eye 1.2 m above the seat, looking at the pitch centre, target just ahead", () => {
+    const p = seatViewPose([0, -60, 8]);
+    expect(p.eye).toEqual([0, -60, 8 + SEAT_EYE_M]);
+    expect(p.hfov).toBe(SEAT_HFOV);
+    const d = p.target.map((v, k) => v - p.eye[k]);
+    expect(Math.hypot(...d)).toBeCloseTo(SEAT_LOOK_M, 9);
+    const toCentre = p.eye.map((v) => -v), n = Math.hypot(...toCentre);
+    d.forEach((v, k) => expect(v / SEAT_LOOK_M).toBeCloseTo(toCentre[k] / n, 9));
   });
-  it("worst-case visible seats from any section framing stays <= 25k (decision D6)", () => {
+  it("worst-case visible seats from any section's seat view stays <= 25k (decision D6)", () => {
     let worst = 0;
     for (const s of doc.sections) {
-      const ids = visibleSections(sectionFraming(s).eye, doc.sections, SEAT_LOD_DIST, Number(s.id));
+      const ids = visibleSections(s.view.eye, doc.sections, SEAT_LOD_DIST, Number(s.id));
       worst = Math.max(worst, doc.sections.filter((x) => ids.has(Number(x.id))).reduce((a, x) => a + x.seats, 0));
     }
     expect(worst).toBeLessThanOrEqual(25_000);

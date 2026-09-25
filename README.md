@@ -95,3 +95,22 @@ permission prompt. If you see that, run it from Terminal.app directly:
   Blender renders agree.
 - Procedural shaders (sail panels, LEDs, grass) will need baking to textures for glTF. Day and night
   lightmaps can be baked separately, and the web toggle blends between them.
+
+## Web viewer (phase 2)
+
+Export (inside the open Blender session, via the MCP; never headless here):
+
+    import sys; sys.path.insert(0, "<repo>/scripts")
+    import export_web; export_web.run(quality="draft")     # or "full" (~2-3 h of bakes)
+
+Then:
+
+    scripts/optimize_web.sh            # build/web_raw -> web/public/assets, fails above 35 MB
+    cd web && npm install && npm run dev
+
+URL parameters: `state=day|golden|night`, `cam=<Blender camera name>`, `size=1920x1080`, `stats=1`.
+Seat availability is a seeded mock. Numbering is the invented one in `data/`.
+
+The PoC zooms to sections only (there is no seat fly-to); `CAM_Seat_*` framings are still valid
+values for `cam`. See `docs/superpowers/reports/2026-09-25-visual-check.md` for the Cycles-vs-viewer
+comparison and performance numbers.

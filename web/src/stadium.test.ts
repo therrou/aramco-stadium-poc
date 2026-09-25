@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import * as THREE from "three";
-import { splitByGroup, GROUND_RE, OVERLAY_RE, SAIL_COAT, SPEC_OCC, overlayOffset, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
+import { splitByGroup, GROUND_ENV, OVERLAY_RE, SAIL_NIGHT_ENV, SAIL_RE, envIntensityOf, sailEnvIntensity, SAIL_COAT, SPEC_OCC, overlayOffset, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
 
 it("patches three r186 lights_fragment_maps (lightmap blend, no diffuse IBL, env blend)", () => {
   const out = patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps);
@@ -36,9 +36,20 @@ it("every IBL radiance sample in the patched chunk is blended with the B env (cl
   expect(calls.length).toBe(2);
   expect(blended.length).toBe(calls.length);
 });
-it("ground materials by name", () => {
-  for (const m of ["M_Sand.web", "M_Lawn.web", "M_Asphalt.web", "M_Paving.web", "M_Plaza.web"]) expect(GROUND_RE.test(m)).toBe(true);
-  expect(GROUND_RE.test("M_SailSkin.web")).toBe(false);
+it("A2: reflection strength by material name; unlisted materials keep 1", () => {
+  for (const m of ["M_Sand.web", "M_Lawn.web", "M_Asphalt.web", "M_Paving.web", "M_Plaza.web"]) expect(envIntensityOf(m)).toBe(GROUND_ENV);
+  expect(envIntensityOf("M_ConcourseGlass.web")).toBe(0.3);
+  expect(envIntensityOf("M_SuiteGlass.web")).toBe(0.3);
+  expect(envIntensityOf("M_Grass.web")).toBe(0.2);
+  expect(envIntensityOf("M_Steel.web")).toBe(0.5);
+  expect(envIntensityOf("M_SailSkin.web")).toBeUndefined();
+  expect(envIntensityOf("M_GrassX.web")).toBeUndefined();
+});
+it("A5: sail reflections fade toward SAIL_NIGHT_ENV at night", () => {
+  expect(sailEnvIntensity(0)).toBe(1);
+  expect(sailEnvIntensity(1)).toBeCloseTo(SAIL_NIGHT_ENV, 9);
+  expect(SAIL_RE.test("M_SailSkin.web")).toBe(true);
+  expect(SAIL_RE.test("M_SailUnder.web")).toBe(false);
 });
 it("a material shared across lightmap groups gets one copy per group (same name)", () => {
   const root = new THREE.Group(), m = new THREE.MeshStandardMaterial({ name: "M_Lawn.web" });

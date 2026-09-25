@@ -7,7 +7,7 @@ import { ENV_ROTATION_Y, toThree } from "./coords";
 import { LightingTransition, emissionStrength, envSizeMismatch, exposure, sunColor, sunStrength, sunToward } from "./lightingState";
 import { STATES, type Assets, type State } from "./loader";
 import { Sky } from "./background";
-import { specOccK, type SharedUniforms } from "./stadium";
+import { SAIL_RE, sailEnvIntensity, specOccK, type SharedUniforms } from "./stadium";
 import { clearTreeUniforms, makeTreeUniforms, updateTreeUniforms } from "./treeLight";
 
 /**
@@ -85,10 +85,13 @@ export class Lighting {
   /** false when all env maps exist but differ in size: specular then switches to the target env, no blend. */
   private envBlend = true;
   readonly hasEnv: boolean;
+  /** A5 (v2): sail skin materials, whose reflection fades at night. */
+  private sails: THREE.MeshStandardMaterial[];
   constructor(private renderer: THREE.WebGLRenderer, private scene: THREE.Scene, private a: Assets,
               private groups: Map<string, THREE.MeshStandardMaterial[]>, private emissive: THREE.MeshStandardMaterial[], initial: State,
               public shared: SharedUniforms, readonly hasLightmaps: boolean) {
     this.t = new LightingTransition(initial);
+    this.sails = [...groups.values()].flat().filter((m) => SAIL_RE.test(m.name));
     this.hasEnv = STATES.every((s) => a.env[s]);
     if (this.hasEnv) {
       const bad = envSizeMismatch(STATES.map((s) => a.env[s]!.image as { width: number; height: number }));
@@ -128,6 +131,7 @@ export class Lighting {
     this.shared.uEnvBlend.value = this.envBlend ? e : 0;
     this.shared.uNight.value = n;
     this.shared.uSoK.value = specOccK(n);
+    for (const m of this.sails) m.envMapIntensity = sailEnvIntensity(n);
     this.sky.setBlend(e);
     for (const m of this.emissive) m.emissiveIntensity = emissionStrength(m.userData.emDay ?? 0, m.userData.emNight ?? 0, n);
     this.renderer.toneMappingExposure = exposure(n, cameraExposure);

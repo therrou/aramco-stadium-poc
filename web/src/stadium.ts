@@ -93,6 +93,23 @@ export function overlayOffset(reversedDepth: boolean) {
  */
 export const GROUND_RE = /^M_(Sand|Lawn|Asphalt|Paving|Plaza)\b/;
 export const GROUND_ENV = 0.3;
+/**
+ * A2 (v2): sky reflection strength per material, first match wins (envMapIntensity scales the PMREM
+ * sample and the clear coat alike). Glass mirrored the ~3.6 horizon (podium mean 202 web vs 97 Cycles),
+ * grass had full sky sheen. Tuned in Task 8.
+ */
+export const ENV_INTENSITY: [RegExp, number][] = [
+  [GROUND_RE, GROUND_ENV],
+  [/^M_(ConcourseGlass|SuiteGlass)\b/, 0.3],
+  [/^M_Grass\b/, 0.2],
+  [/^M_Steel\b/, 0.5],
+];
+export const envIntensityOf = (name: string) => ENV_INTENSITY.find(([re]) => re.test(name))?.[1];
+
+export const SAIL_RE = /^M_SailSkin\b/;
+/** A5 (v2): sail skin reflection at night (Cycles shows dark skin with LEDs, the web mirrored the dusk sky). Tuned in Task 8. */
+export const SAIL_NIGHT_ENV = 0.5;
+export const sailEnvIntensity = (n: number) => 1 + (SAIL_NIGHT_ENV - 1) * n;
 /** M_SailSkin: pearl metal with a clear coat (Blender coat 0.35, coat roughness 0.08). */
 export const SAIL_COAT = { clearcoat: 0.35, clearcoatRoughness: 0.08 };
 
@@ -137,7 +154,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     const m = mesh.isMesh ? (mesh.material as THREE.MeshStandardMaterial) : null;
-    if (!m || !m.name.startsWith("M_SailSkin") || (m as THREE.MeshPhysicalMaterial).isMeshPhysicalMaterial) return;
+    if (!m || !SAIL_RE.test(m.name) || (m as THREE.MeshPhysicalMaterial).isMeshPhysicalMaterial) return;
     if (!coated.has(m)) coated.set(m, toCoatedSail(m));
     mesh.material = coated.get(m)!;
   });
@@ -165,7 +182,8 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
     if (Array.isArray(ex.tint) && ex.tint.length === 3) mat.color.setRGB(ex.tint[0], ex.tint[1], ex.tint[2]);   // Task 13b (E): linear, may exceed 1
     mat.userData.lmB = { value: null as THREE.Texture | null };
     mat.lightMapIntensity = Math.PI;        // Cycles diffuse bake is E/π; three multiplies by albedo/π
-    if (GROUND_RE.test(mat.name)) mat.envMapIntensity = GROUND_ENV;
+    const env = envIntensityOf(mat.name);
+    if (env !== undefined) mat.envMapIntensity = env;
     if (OVERLAY_RE.test(mat.name)) {
       const o = overlayOffset(reversedDepth);
       mat.polygonOffset = true;

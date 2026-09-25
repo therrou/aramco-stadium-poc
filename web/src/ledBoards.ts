@@ -2,7 +2,8 @@ import * as THREE from "three";
 
 /**
  * Pitch LED advertising boards (user request 2026-09-25): the style of the LED ribbons at the 2026 World Cup
- * (blue and green swooshes, white type), alternating "POWERED BY aramco" and AKQA panels, facing the pitch.
+ * (blue and green swooshes, white type) for "POWERED BY aramco", alternating with a separate white AKQA sign
+ * (black serif logo), with a dark seam between signs, facing the pitch.
  * The boards are one double-sided plane (scripts/stadium/pitch.py: 0.95 m tall, 5 m off the lines, a loop with
  * a gap at the tunnel); the shader shows the ad on the side facing the pitch and a black, empty back to the
  * stands. The artwork is drawn at runtime into a canvas atlas (one row per panel); every SWAP_S seconds the
@@ -67,7 +68,7 @@ export const LED_EMISSIVE_GLSL = "{ bool fp; vec3 ad = ledBoardColor( vWorldPosB
 // ---- the artwork (browser only) ----
 
 const BLUE = "#1f8be8", BLUE_DEEP = "#0b5fc4", GREEN = "#2fc43c", GREEN_DEEP = "#12a14a";
-const PX_W = 2048, PX_H = 160;   // one 12 m x 0.95 m panel at ~170 px per metre
+const PX_W = 2048, PX_H = 160, SEAM_PX = 42;   // one 12 m x 0.95 m panel at ~170 px per metre
 
 function swooshes(g: CanvasRenderingContext2D, y0: number, flip: boolean) {
   const W = PX_W, H = PX_H, X = (x: number) => (flip ? W - x : x);
@@ -99,11 +100,19 @@ function drawAramco(g: CanvasRenderingContext2D, y0: number) {
   g.fillText("aramco", bx + bw / 2, cy + 2);
 }
 
+/** AKQA (user request): its own sign, white with the black serif logo, not the aramco ribbon. */
 function drawAkqa(g: CanvasRenderingContext2D, y0: number) {
-  swooshes(g, y0, true);
-  g.fillStyle = "#ffffff"; g.textBaseline = "middle"; g.textAlign = "center";
-  g.font = `700 128px "Playfair Display", "Times New Roman", serif`;
+  g.fillStyle = "#ffffff"; g.fillRect(0, y0, PX_W, PX_H);
+  g.fillStyle = "#000000"; g.textBaseline = "middle"; g.textAlign = "center";
+  g.font = `700 132px "Playfair Display", "Times New Roman", serif`;
   g.fillText("AKQA", PX_W / 2, y0 + PX_H / 2 + 8);
+}
+
+/** A dark seam at both ends of every panel, so neighbouring signs read as separate boards (~0.25 m each side). */
+function seams(g: CanvasRenderingContext2D, y0: number) {
+  g.fillStyle = "#050507";
+  g.fillRect(0, y0, SEAM_PX, PX_H);
+  g.fillRect(PX_W - SEAM_PX, y0, SEAM_PX, PX_H);
 }
 
 /** The ad atlas: aramco in the top row, AKQA in the bottom one. Redrawn once the web fonts arrive. */
@@ -111,7 +120,7 @@ export function makeAdAtlas(): THREE.CanvasTexture {
   const c = document.createElement("canvas");
   c.width = PX_W; c.height = PX_H * 2;
   const g = c.getContext("2d")!, tex = new THREE.CanvasTexture(c);
-  const draw = () => { drawAramco(g, 0); drawAkqa(g, PX_H); tex.needsUpdate = true; };
+  const draw = () => { drawAramco(g, 0); drawAkqa(g, PX_H); seams(g, 0); seams(g, PX_H); tex.needsUpdate = true; };
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
   draw();

@@ -18,7 +18,9 @@ export class LightingTransition {
   update(dt: number) {
     if (this.blend >= 1) return;
     this.blend = Math.min(1, this.blend + dt / (this.pending ? QUEUED_S : TRANSITION_S));
-    if (this.blend >= 1 && this.pending) { this.from = this.to; this.to = this.pending; this.pending = null; this.blend = 0; }
+    if (this.blend < 1) return;
+    if (this.pending) { this.from = this.to; this.to = this.pending; this.pending = null; this.blend = 0; }
+    else this.from = this.to;   // settle (final review 1b): Lighting then rebinds A = B, so no sampler keeps the old state
   }
   get eased() { return smooth(this.blend); }
   get night() { return STATE_NIGHT[this.from] + (STATE_NIGHT[this.to] - STATE_NIGHT[this.from]) * this.eased; }

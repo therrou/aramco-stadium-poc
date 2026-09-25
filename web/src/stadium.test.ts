@@ -27,8 +27,14 @@ it("sail skin becomes a clear-coated physical copy with the same PBR values", ()
   expect([p.name, p.metalness, p.roughness, p.userData.special]).toEqual(["M_SailSkin.web", 0.9, 0.24, "sailLeds"]);
   expect([p.clearcoat, p.clearcoatRoughness]).toEqual([SAIL_COAT.clearcoat, SAIL_COAT.clearcoatRoughness]);
 });
-it("the lights chunk patch leaves the clear coat IBL path in place", () => {
-  expect(patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps)).toContain("clearcoatRadiance += getIBLRadiance");
+it("every IBL radiance sample in the patched chunk is blended with the B env (clear coat too)", () => {
+  const out = patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps);
+  expect(out).toContain("clearcoatRadiance += mix( getIBLRadiance( geometryViewDir, geometryClearcoatNormal");
+  // each getIBLRadiance( call must be the first argument of a mix(...) with getIBLRadianceB
+  const calls = out.match(/getIBLRadiance\(/g) ?? [];
+  const blended = out.match(/mix\( getIBLRadiance\([^;]*getIBLRadianceB\([^;]*uEnvBlend \)/g) ?? [];
+  expect(calls.length).toBe(2);
+  expect(blended.length).toBe(calls.length);
 });
 it("ground materials by name", () => {
   for (const m of ["M_Sand.web", "M_Lawn.web", "M_Asphalt.web", "M_Paving.web", "M_Plaza.web"]) expect(GROUND_RE.test(m)).toBe(true);

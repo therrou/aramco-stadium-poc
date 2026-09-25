@@ -8,6 +8,25 @@ describe("transitions (Review Focus 1)", () => {
     for (let i = 0; i < 60; i++) t.update(1 / 60);
     expect(t.night).toBeCloseTo(1, 6);
   });
+  it("settles when a transition completes with nothing pending (from = to, blend = 1)", () => {
+    const t = new LightingTransition("day");
+    t.request("night");
+    for (let i = 0; i < 59; i++) t.update(1 / 60);
+    expect(t.from).toBe("day");
+    for (let i = 0; i < 5; i++) t.update(1 / 60);
+    expect([t.from, t.to, t.blend]).toEqual(["night", "night", 1]);
+    expect(t.night).toBe(1);
+    t.request("golden");
+    expect([t.from, t.to, t.blend]).toEqual(["night", "golden", 0]);
+  });
+  it("a queued state still plays, then settles on it", () => {
+    const t = new LightingTransition("day");
+    t.request("night");
+    t.update(0.3);
+    t.request("golden");
+    for (let i = 0; i < 180; i++) t.update(1 / 60);
+    expect([t.from, t.to, t.blend]).toEqual(["golden", "golden", 1]);
+  });
   it("reversal mid-way continues from the current value (no jump)", () => {
     const t = new LightingTransition("day");
     t.request("night");

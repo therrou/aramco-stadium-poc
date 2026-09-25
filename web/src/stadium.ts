@@ -3,14 +3,19 @@ import * as THREE from "three";
 const LM_RE = /vec4 lightMapTexel = texture2D\( lightMap, vLightMapUv \);\s*vec3 lightMapIrradiance = lightMapTexel\.rgb \* lightMapIntensity;/;
 const IBL_IRR_RE = /iblIrradiance \+= getIBLIrradiance\( geometryNormal \);/;
 const IBL_RAD_RE = /vec3 iblRadiance = getIBLRadiance\( geometryViewDir, geometryNormal, material\.roughness \);/;
+const COAT_RAD_RE = /clearcoatRadiance \+= getIBLRadiance\( geometryViewDir, geometryClearcoatNormal, material\.clearcoatRoughness \);/;
 
-/** Decisions D8/D10: blend two RGBM lightmaps, drop diffuse IBL, blend two PMREMs for specular. */
+/**
+ * Decisions D8/D10: blend two RGBM lightmaps, drop diffuse IBL, blend two PMREMs for specular. The clear
+ * coat IBL (sail skin) is blended the same way (final review 1a): envMap alone is the "from" PMREM.
+ */
 export function patchLightsChunk(chunk: string) {
-  for (const re of [LM_RE, IBL_IRR_RE, IBL_RAD_RE]) if (!re.test(chunk)) throw new Error(`three.js lights_fragment_maps changed: ${re}`);
+  for (const re of [LM_RE, IBL_IRR_RE, IBL_RAD_RE, COAT_RAD_RE]) if (!re.test(chunk)) throw new Error(`three.js lights_fragment_maps changed: ${re}`);
   return chunk
     .replace(LM_RE, `vec3 lightMapIrradiance = mix( rgbmDecode( texture2D( lightMap, vLightMapUv ) ), rgbmDecode( texture2D( uLmB, vLightMapUv ) ), uLmBlend ) * lightMapIntensity;`)
     .replace(IBL_IRR_RE, "")
-    .replace(IBL_RAD_RE, `vec3 iblRadiance = mix( getIBLRadiance( geometryViewDir, geometryNormal, material.roughness ), getIBLRadianceB( geometryViewDir, geometryNormal, material.roughness ), uEnvBlend );`);
+    .replace(IBL_RAD_RE, `vec3 iblRadiance = mix( getIBLRadiance( geometryViewDir, geometryNormal, material.roughness ), getIBLRadianceB( geometryViewDir, geometryNormal, material.roughness ), uEnvBlend );`)
+    .replace(COAT_RAD_RE, `clearcoatRadiance += mix( getIBLRadiance( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), getIBLRadianceB( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), uEnvBlend );`);
 }
 
 const PARS = /* glsl */ `

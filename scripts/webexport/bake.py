@@ -14,6 +14,13 @@ QUALITY = {"draft": {"scale": 0.5, "samples": 64}, "full": {"scale": 1.0, "sampl
 ATLAS_HI = {}
 
 
+def resolve_samples(quality, samples=None):
+    """Sample count for a bake: `samples` overrides QUALITY[quality]["samples"] without touching
+    scale, so a full-quality bake can reuse an existing (e.g. "draft") UV layout/atlas size and just
+    raise sample count (pure, host-tested: no bpy)."""
+    return QUALITY[quality]["samples"] if samples is None else samples
+
+
 def _area(objs):
     return sum(p.area for o in objs for p in o.data.polygons)
 

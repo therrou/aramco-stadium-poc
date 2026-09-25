@@ -112,10 +112,13 @@ def stage_geometry(report, quality):
     assert not fails, fails
 
 
-def stage_bake(report, quality, only_states=None, only_groups=None):
-    """UVs once, then (group x state) lightmaps, then env maps; re-exports stadium.glb with UVs."""
+def stage_bake(report, quality, only_states=None, only_groups=None, samples=None):
+    """UVs once, then (group x state) lightmaps, then env maps; re-exports stadium.glb with UVs.
+    `samples` overrides QUALITY[quality]["samples"] (e.g. quality="draft", samples=256 for a
+    full-quality bake that reuses the draft UV layout/atlas size; see bake.resolve_samples)."""
     from webexport import bake, gltfout, manifest, rgbm, webscene
     q = bake.QUALITY[quality]
+    samples = bake.resolve_samples(quality, samples)
     web = bpy.data.scenes[webscene.WEB]
     objs = [o for o in web.objects if o.get("webexport")]
     by = {}
@@ -130,6 +133,7 @@ def stage_bake(report, quality, only_states=None, only_groups=None):
             gltfout.export_glb(objs, os.path.join(RAW, "stadium.glb"))    # now with real LightmapUVs
         report["atlas"] = json.loads(web["lm_atlas"])
         report["uv"] = {g: v for g, v in bake.CHART_STATS.items() if g != "flipped"}
+        report["bake_samples"] = samples
         patch = {"states": {}, "rgbmRange": rgbm.RANGE}          # the encoding these PNGs use
         for state, n in manifest.STATES.items():
             if only_states and state not in only_states:
@@ -138,7 +142,7 @@ def stage_bake(report, quality, only_states=None, only_groups=None):
             for g, gobjs in by.items():
                 if only_groups and g not in only_groups:
                     continue
-                p = bake.bake_lightmap(g, gobjs, report["atlas"][g], state, n, q["samples"])
+                p = bake.bake_lightmap(g, gobjs, report["atlas"][g], state, n, samples)
                 lm[g] = os.path.relpath(p, RAW)
             env = bake.bake_env(state, n)
             report.setdefault("sun_error_deg", {})[state] = round(bake.sun_check(env, n), 1) if n < 1 else None

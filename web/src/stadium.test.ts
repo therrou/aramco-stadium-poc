@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import * as THREE from "three";
 import { BLOOM } from "./lighting";
+import { BOARDS, LED_EMISSIVE_GLSL } from "./ledBoards";
 import { FLOOD_LENS_MAX, LED_CELL, LED_COVER, LED_GLSL, LED_MAX, LED_R, setupStadiumMaterials } from "./stadium";
 import { splitByGroup, GROUND_ENV, OVERLAY_RE, SAIL_NIGHT_ENV, SAIL_RE, envIntensityOf, sailEnvIntensity, SAIL_COAT, SPEC_OCC, SAIL_NIGHT_E, lightsChunkFor, overlayOffset, soMinDefine, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
 
@@ -131,4 +132,18 @@ it("v3: surface textures get anisotropic filtering (grazing ground showed moire 
   const shared = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: 16 }, uNight: { value: 0 }, uSoK: { value: specOccK(0) } };
   setupStadiumMaterials(root, shared, false, false, 16);
   expect([tex.anisotropy, nrm.anisotropy]).toEqual([8, 8]);
+});
+it("LED ad boards: lit by their ad (day and night strengths), black surface, own program", () => {
+  const root = new THREE.Group(), m = new THREE.MeshStandardMaterial({ name: "M_LEDBoard.web" });
+  m.userData = { emDay: 0.3, emNight: 5 };
+  root.add(new THREE.Mesh(new THREE.BufferGeometry(), m));
+  const shared = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: 16 }, uNight: { value: 0 }, uSoK: { value: specOccK(0) } };
+  setupStadiumMaterials(root, shared, true);
+  expect([m.userData.emDay, m.userData.emNight]).toEqual([BOARDS.emDay, BOARDS.emNight]);
+  expect(m.emissive.getHex()).toBe(0xffffff);
+  expect(m.customProgramCacheKey()).toContain("-led");
+  const s = { uniforms: {}, vertexShader: "#include <common>\n#include <worldpos_vertex>", fragmentShader: "#include <envmap_physical_pars_fragment>\n#include <shadowmap_pars_fragment>\n#include <map_fragment>\n#include <emissivemap_fragment>\n#include <lights_fragment_maps>" } as unknown as THREE.WebGLProgramParametersWithUniforms;
+  m.onBeforeCompile(s, {} as THREE.WebGLRenderer);
+  expect(s.fragmentShader).toContain(LED_EMISSIVE_GLSL);
+  expect(Object.keys(s.uniforms)).toContain("uAds");
 });

@@ -3,6 +3,7 @@ import { MAX_CHARTS, chartUniforms, chartsOfMesh, pitchLinesGlsl, type Chart } f
 import { STATE_NIGHT } from "./lightingState";
 import { SUN_VIS_GLSL } from "./sunShadow";
 import { PLANAR_GLSL, isPlanarMaterial } from "./planarReflect";
+import { BOARDS, LED_EMISSIVE_GLSL, LED_GLSL_BOARDS, isLedBoard, ledUniforms } from "./ledBoards";
 import { BICUBIC_GLSL, CONCRETE_GLSL, GRASS_GLSL, GROUND_GLSL, GROUND_MAP_GLSL, NET, NET_GLSL, detailFor } from "./detail";
 
 const LM_RE = /vec4 lightMapTexel = texture2D\( lightMap, vLightMapUv \);\s*vec3 lightMapIrradiance = lightMapTexel\.rgb \* lightMapIntensity;/;
@@ -292,6 +293,14 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
     const ex = mat.userData as { emDay?: number; emNight?: number; special?: string; tint?: number[] };
     const detail = detailFor(mat.name);
     const planar = useLightmaps && isPlanarMaterial(mat.name);
+    const led = isLedBoard(mat.name);
+    if (led) {                                        // pitch LED ad boards (ledBoards.ts): black panels lit by the ad
+      ex.emDay = BOARDS.emDay; ex.emNight = BOARDS.emNight;
+      mat.emissive.setRGB(1, 1, 1);
+      mat.color.setRGB(0.012, 0.012, 0.014);
+      mat.roughness = 0.6;
+      mat.envMapIntensity = 0.12;                   // the sky's sheen on the glossy face washed the ad out
+    }
     for (const t of [mat.map, mat.normalMap, mat.roughnessMap, mat.metalnessMap, mat.emissiveMap]) if (t) t.anisotropy = Math.min(MAX_ANISO, maxAniso);
     if (detail === "grass") mat.map = null;           // D1: the shader draws the grass; the 1024 px bake is not needed
     if (detail === "net") { mat.transparent = true; mat.depthWrite = false; mat.side = THREE.DoubleSide; mat.alphaTest = 0; }
@@ -312,23 +321,25 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
     }
     if (group) (byGroup.get(group) ?? byGroup.set(group, []).get(group)!).push(mat);
     mat.onBeforeCompile = (s) => {
-      Object.assign(s.uniforms, shared, { uLmB: mat.userData.lmB }, lines ? chartUniforms(lineCharts!) : {});
+      Object.assign(s.uniforms, shared, { uLmB: mat.userData.lmB }, lines ? chartUniforms(lineCharts!) : {}, led ? ledUniforms : {});
       s.vertexShader = s.vertexShader
         .replace("#include <common>", "#include <common>\nvarying vec3 vWorldPosB;")
         .replace("#include <worldpos_vertex>", "#include <worldpos_vertex>\nvec4 wpB = modelMatrix * vec4( transformed, 1.0 ); vWorldPosB = vec3( wpB.x, -wpB.z, wpB.y );");
       s.fragmentShader = s.fragmentShader
         .replace("#include <shadowmap_pars_fragment>", "#include <shadowmap_pars_fragment>\n" + SUN_VIS_GLSL)
-        .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + soMinDefine(ex.special) + (planar ? "#define PLANAR_REFLECT\n" : "") + PARS + (ex.special === "sailLeds" ? LED_GLSL : "")
+        .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + soMinDefine(ex.special) + (planar ? "#define PLANAR_REFLECT\n" : "") + PARS + (led ? LED_GLSL_BOARDS : "") + (ex.special === "sailLeds" ? LED_GLSL : "")
           + (lines ? pitchLinesGlsl(lineCharts!.length) : ""))
         .replace("#include <lights_fragment_maps>", lightsChunkFor(chunk, useLightmaps, lines, detail));
       if (detail) s.fragmentShader = s.fragmentShader
         .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + DETAIL_GLSL[detail])
         .replace("#include <map_fragment>", "#include <map_fragment>\n" + DETAIL_MAP[detail])
+      if (led) s.fragmentShader = s.fragmentShader
+        .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n" + LED_EMISSIVE_GLSL);
       if (ex.special === "sailLeds")
         s.fragmentShader = s.fragmentShader.replace("#include <emissivemap_fragment>",
           "#include <emissivemap_fragment>\ntotalEmissiveRadiance = min( totalEmissiveRadiance * sailLeds( vWorldPosB ), vec3( " + LED_MAX.toFixed(2) + " ) );");
     };
-    mat.customProgramCacheKey = () => `stadium-${useLightmaps}-${ex.special ?? ""}${lines ? `-lines${lineCharts!.length}` : ""}-${detail ?? ""}${planar ? "-planar" : ""}`;
+    mat.customProgramCacheKey = () => `stadium-${useLightmaps}-${ex.special ?? ""}${lines ? `-lines${lineCharts!.length}` : ""}-${detail ?? ""}${planar ? "-planar" : ""}${led ? "-led" : ""}`;
     mat.needsUpdate = true;
   });
   return byGroup;

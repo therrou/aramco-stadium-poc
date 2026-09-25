@@ -19,6 +19,7 @@ import { GROUND_RE, setupStadiumMaterials, specOccK, type SharedUniforms } from 
 import { Lighting, makeComposer } from "./lighting";
 import { SunShadow } from "./sunShadow";
 import { BOWL_LAYER, NO_REFLECT_LAYER, PlazaReflection } from "./planarReflect";
+import { ledUniforms, makeAdAtlas } from "./ledBoards";
 import { missingLightmaps } from "./lightingState";
 import { setupTrees } from "./trees";
 import { heroesIn } from "./heroViews";
@@ -87,6 +88,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const useLightmaps = missing.length === 0;
   if (!useLightmaps && STATES.some((s) => Object.keys(a.lightmaps[s]).length > 0))
     console.warn(`Lighting: incomplete lightmap bake, using fallback lights. Missing: ${missing.join(", ")}`);
+  ledUniforms.uAds.value = makeAdAtlas();              // pitch LED ad boards (aramco / AKQA)
   const groups = setupStadiumMaterials(a.stadium.scene, shared, useLightmaps, renderer.capabilities.reversedDepthBuffer, renderer.capabilities.getMaxAnisotropy());
   const emissive = new Set<THREE.MeshStandardMaterial>();   // Set: the optimized glb shares materials between meshes
   a.stadium.scene.traverse((o) => {
@@ -249,6 +251,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     seats.setVisibleSections(vis, nearSections(toBlender(camera.position), a.sections.sections, SEAT_NEAR_M, NEAR_SEAT_CAP));
     patches.setHidden(vis);
     highlight.update(now / 1000);
+    ledUniforms.uAdTime.value += dt;
     lighting.update(dt, rig.exposure, camera);
     sun?.update(lighting.t.night);
     mirror?.update(renderer, scene, camera, toBlender(camera.position));

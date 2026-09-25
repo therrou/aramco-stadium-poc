@@ -42,3 +42,48 @@ describe("seats.bin (contract with scripts/webexport/seatbin.py)", () => {
     expect(() => indexSections(t)).toThrow(/section 101 is not contiguous/);
   });
 });
+
+import { SeatDirectory, formatSeat, parseSeatParam, sectionsOfTier } from "./seatsData";
+import type { Section } from "./loader";
+
+const table = (): SeatTable => ({
+  count: 5,
+  section: new Uint16Array([101, 101, 101, 212, 212]),
+  row: new Uint8Array([2, 1, 1, 10, 10]),
+  seat: new Uint16Array([1, 7, 3, 4, 5]),
+  pos: new Float32Array([0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]),
+  yaw: new Float32Array(5),
+});
+describe("seat directory (spec part 2: only real rows and seats are offered)", () => {
+  const t = table(), dir = new SeatDirectory(t, indexSections(t));
+  it("rows and seats are sorted numerically", () => {
+    expect(dir.rows(101)).toEqual([1, 2]);
+    expect(dir.seats(101, 1)).toEqual([3, 7]);
+    expect(dir.seats(212, 10)).toEqual([4, 5]);
+  });
+  it("unknown section/row gives empty lists", () => {
+    expect(dir.rows(999)).toEqual([]);
+    expect(dir.seats(101, 9)).toEqual([]);
+  });
+  it("finds a seat index and back", () => {
+    expect(dir.find({ section: 101, row: 1, seat: 3 })).toBe(2);
+    expect(dir.ref(2)).toEqual({ section: 101, row: 1, seat: 3 });
+    expect(dir.position(2)).toEqual([4, 5, 6]);
+    expect(dir.find({ section: 101, row: 1, seat: 4 })).toBe(-1);
+    expect(dir.find({ section: 999, row: 1, seat: 1 })).toBe(-1);
+  });
+});
+describe("?seat= links (Review Focus 1)", () => {
+  it("round trips", () => {
+    const r = { section: 212, row: 10, seat: 4 };
+    expect(formatSeat(r)).toBe("212-10-4");
+    expect(parseSeatParam(formatSeat(r))).toEqual(r);
+  });
+  it("rejects malformed values", () => {
+    for (const v of [null, "", "212-10", "212-10-4-1", "abc", "212-x-4", "-1-2-3", "212-10-4 "]) expect(parseSeatParam(v)).toBeNull();
+  });
+});
+it("sections of a tier, numeric order", () => {
+  const s = [{ id: "112", tier: "Lower" }, { id: "201", tier: "Club" }, { id: "101", tier: "Lower" }] as Section[];
+  expect(sectionsOfTier(s, "Lower")).toEqual([101, 112]);
+});

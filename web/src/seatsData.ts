@@ -1,3 +1,7 @@
+import type { V3 } from "./coords";
+import type { Section } from "./loader";
+import type { Tier } from "./tiers";
+
 export interface SeatTable { count: number; section: Uint16Array; row: Uint8Array; seat: Uint16Array; pos: Float32Array; yaw: Float32Array }
 const HEADER = 16, RECORD = 19;
 
@@ -46,4 +50,34 @@ export function indexSections(t: SeatTable) {
     }
   }
   return idx;
+}
+
+export interface SeatRef { section: number; row: number; seat: number }
+/** `?seat=` and sections.json `view.seat` format: section-row-seat. */
+export const formatSeat = (r: SeatRef) => `${r.section}-${r.row}-${r.seat}`;
+export function parseSeatParam(v: string | null): SeatRef | null {
+  const m = /^(\d{1,5})-(\d{1,3})-(\d{1,5})$/.exec(v ?? "");
+  return m ? { section: Number(m[1]), row: Number(m[2]), seat: Number(m[3]) } : null;
+}
+
+export const sectionsOfTier = (sections: Section[], tier: Tier) =>
+  sections.filter((s) => s.tier === tier).map((s) => Number(s.id)).sort((a, b) => a - b);
+
+/** Section -> row -> seat lookups over seats.bin (seat finder option lists, links, picking). */
+export class SeatDirectory {
+  /** section -> row -> seat indices sorted by seat number; rows in numeric order. */
+  private bySection = new Map<number, Map<number, number[]>>();
+  constructor(readonly t: SeatTable, idx: Map<number, { start: number; end: number }>) {
+    for (const [sec, { start, end }] of idx) {
+      const rows = new Map<number, number[]>();
+      for (let i = start; i < end; i++) (rows.get(t.row[i]) ?? rows.set(t.row[i], []).get(t.row[i])!).push(i);
+      for (const ids of rows.values()) ids.sort((a, b) => t.seat[a] - t.seat[b]);
+      this.bySection.set(sec, new Map([...rows].sort((a, b) => a[0] - b[0])));
+    }
+  }
+  rows(section: number) { return [...(this.bySection.get(section)?.keys() ?? [])]; }
+  seats(section: number, row: number) { return (this.bySection.get(section)?.get(row) ?? []).map((i) => this.t.seat[i]); }
+  find(r: SeatRef) { return this.bySection.get(r.section)?.get(r.row)?.find((i) => this.t.seat[i] === r.seat) ?? -1; }
+  ref(i: number): SeatRef { return { section: this.t.section[i], row: this.t.row[i], seat: this.t.seat[i] }; }
+  position(i: number): V3 { return [this.t.pos[i * 3], this.t.pos[i * 3 + 1], this.t.pos[i * 3 + 2]]; }
 }

@@ -14,7 +14,12 @@ const COAT_RAD_RE = /clearcoatRadiance \+= getIBLRadiance\( geometryViewDir, geo
  * the bake's units (W/m^2, decoded RGBM x PI): day sunlit ground ~3, golden ~1.5, night floods ~1.1 in
  * the bowl. K is the irradiance at which a surface gets its full reflection. Tuned in Task 8.
  */
-export const SPEC_OCC = { k: { day: 2.0, golden: 1.0, night: 1.2 }, min: 0.1 };
+export const SPEC_OCC = { k: { day: 2.0, golden: 1.0, night: 0.5 }, min: 0.1, sailMin: 0.5 };
+/**
+ * Occlusion floor per material: the sail skin's night lightmap is coarse (1024 px over ~40k m^2) and noisy,
+ * and full occlusion printed its texel blocks onto the reflections. Sunlit sails sit above K by day anyway.
+ */
+export const soMinDefine = (special: string | undefined) => `#define SO_MIN ${(special === "sailLeds" ? SPEC_OCC.sailMin : SPEC_OCC.min).toFixed(3)}`;
 export function specOccK(n: number) {
   const g = STATE_NIGHT.golden;
   return n <= g ? SPEC_OCC.k.day + (SPEC_OCC.k.golden - SPEC_OCC.k.day) * (n / g)
@@ -45,7 +50,7 @@ uniform sampler2D uEnvB; uniform float uEnvBlend; uniform float uNight;
 varying vec3 vWorldPosB;
 vec3 rgbmDecode( vec4 c ) { return c.rgb * c.a * uRgbmRange; }
 uniform float uSoK;
-float lmSpecOcc( vec3 e ) { return clamp( dot( e, vec3( 0.2126, 0.7152, 0.0722 ) ) / uSoK, ${SPEC_OCC.min.toFixed(3)}, 1.0 ); }
+float lmSpecOcc( vec3 e ) { return clamp( dot( e, vec3( 0.2126, 0.7152, 0.0722 ) ) / uSoK, SO_MIN, 1.0 ); }
 #if defined( USE_ENVMAP ) && defined( ENVMAP_TYPE_CUBE_UV )
 vec3 getIBLRadianceB( const in vec3 viewDir, const in vec3 normal, const in float roughness ) {
   vec3 r = normalize( mix( reflect( - viewDir, normal ), normal, pow4( roughness ) ) );
@@ -57,14 +62,24 @@ vec3 getIBLRadianceB( const in vec3 v, const in vec3 n, const in float r ) { ret
 #endif
 `;
 
-/** A3 (v2): mean share of a surface covered by the LED dots (sphere r in a cell s: (4/3) pi r^3 / s^3). */
-export const LED_COVER = (4 / 3) * Math.PI * 0.055 ** 3 / 1.1 ** 3;
+/**
+ * A3 (v2): LED lattice. Blender (shell._skin_material) draws one dot of radius 0.05 cell per 1.1 m cell of a
+ * 2D Voronoi in the skin's metre UVs: 1/1.1^2 dots per m^2 covering pi 0.055^2 / 1.1^2 of the skin. The glb's
+ * UVs are quantised, so the web hashes 3D cells instead; a plane crosses spheres of radius r in cells c at
+ * 2r / c^3 dots per m^2 covering (4/3) pi r^3 / c^3. Solving both for the Cycles values gives r = 0.055
+ * sqrt(1.5) and c below. (v1 used c = 1.1, r = 0.055 in 3D: 15x too sparse next to the Cycles renders.)
+ */
+const CYCLES_LED_DENSITY = 1 / 1.1 ** 2, CYCLES_LED_COVER = Math.PI * 0.055 ** 2 / 1.1 ** 2;
+export const LED_R = Math.sqrt((3 * CYCLES_LED_COVER) / (2 * Math.PI * CYCLES_LED_DENSITY));
+export const LED_CELL = Math.cbrt((2 * LED_R) / CYCLES_LED_DENSITY);
+/** Mean share of a surface covered by the LED dots. */
+export const LED_COVER = (4 / 3) * Math.PI * LED_R ** 3 / LED_CELL ** 3;
 /** A3 (v2): LED radiance clamp, below BLOOM.threshold (lighting.ts), so no LED blooms on its own. */
-export const LED_MAX = 10.0;
+export const LED_MAX = 15.0;
 
 /**
- * Decision D7: sail LED points (shell._skin_material): 1.1 m cells, r = 0.055 m, fade 36..50 m, 40 * n.
- * A3 (v2): the 5.5 cm dots are far below a pixel from most views, so a hard step hit or missed each dot
+ * Decision D7: sail LED points (shell._skin_material): cells and radius above, fade 36..50 m, 40 * n.
+ * A3 (v2): the dots are far below a pixel from most views, so a hard step hit or missed each dot
  * per frame and each hit bloomed ("lights re-render" when the camera moved). The dot now grows to the
  * pixel footprint with its radiance scaled to keep its energy ((r0/r)^3, the plane's mean cut through a
  * sphere), edges are smoothstepped over one pixel, and once a pixel spans about a cell it fades to the
@@ -73,15 +88,15 @@ export const LED_MAX = 10.0;
 export const LED_GLSL = /* glsl */ `
 vec3 h33( vec3 p ) { p = fract( p * vec3( 0.1031, 0.1030, 0.0973 ) ); p += dot( p, p.yxz + 33.33 ); return fract( ( p.xxy + p.yxx ) * p.zyx ); }
 float sailLeds( vec3 pB ) {
-  vec3 c = floor( pB / 1.1 ), h = h33( c ), q = ( c + h ) * 1.1;
+  vec3 c = floor( pB / ${LED_CELL.toFixed(4)} ), h = h33( c ), q = ( c + h ) * ${LED_CELL.toFixed(4)};
   float fade = mix( 0.55, 1.01, clamp( ( pB.z - 36.0 ) / 14.0, 0.0, 1.0 ) );
   float lit = step( fade, h.x ) * ( h.y * 1.5 + 0.3 );
   float px = max( length( fwidth( pB ) ), 1e-5 );
-  float r = max( 0.055, 0.5 * px );
-  float k = 0.055 / r;
+  float r = max( ${LED_R.toFixed(4)}, px );
+  float k = ${LED_R.toFixed(4)} / r;
   float dot_ = ( 1.0 - smoothstep( r - 0.5 * px, r + 0.5 * px, length( pB - q ) ) ) * k * k * k;
   float avg = ${LED_COVER.toExponential(4)} * max( 1.0 - fade, 0.0 ) * 1.05;
-  return mix( dot_ * lit, avg, smoothstep( 0.3, 0.9, px / 1.1 ) );
+  return mix( dot_ * lit, avg, smoothstep( 0.3, 0.9, px / ${LED_CELL.toFixed(4)} ) );
 }
 `;
 
@@ -125,7 +140,7 @@ export const envIntensityOf = (name: string) => ENV_INTENSITY.find(([re]) => re.
 
 export const SAIL_RE = /^M_SailSkin\b/;
 /** A5 (v2): sail skin reflection at night (Cycles shows dark skin with LEDs, the web mirrored the dusk sky). Tuned in Task 8. */
-export const SAIL_NIGHT_ENV = 0.5;
+export const SAIL_NIGHT_ENV = 1.0;
 export const sailEnvIntensity = (n: number) => 1 + (SAIL_NIGHT_ENV - 1) * n;
 /** M_SailSkin: pearl metal with a clear coat (Blender coat 0.35, coat roughness 0.08). */
 export const SAIL_COAT = { clearcoat: 0.35, clearcoatRoughness: 0.08 };
@@ -226,7 +241,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
         .replace("#include <common>", "#include <common>\nvarying vec3 vWorldPosB;")
         .replace("#include <worldpos_vertex>", "#include <worldpos_vertex>\nvec4 wpB = modelMatrix * vec4( transformed, 1.0 ); vWorldPosB = vec3( wpB.x, -wpB.z, wpB.y );");
       s.fragmentShader = s.fragmentShader
-        .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + PARS + (ex.special === "sailLeds" ? LED_GLSL : "")
+        .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + soMinDefine(ex.special) + PARS + (ex.special === "sailLeds" ? LED_GLSL : "")
           + (lines ? pitchLinesGlsl(lineCharts!.length) : ""))
         .replace("#include <lights_fragment_maps>", useLightmaps ? (lines ? pitchLinesChunk(chunk) : chunk) : THREE.ShaderChunk.lights_fragment_maps);
       if (ex.special === "sailLeds")

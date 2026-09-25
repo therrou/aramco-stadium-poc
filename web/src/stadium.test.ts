@@ -1,8 +1,8 @@
 import { expect, it } from "vitest";
 import * as THREE from "three";
 import { BLOOM } from "./lighting";
-import { FLOOD_LENS_MAX, LED_COVER, LED_GLSL, LED_MAX, setupStadiumMaterials } from "./stadium";
-import { splitByGroup, GROUND_ENV, OVERLAY_RE, SAIL_NIGHT_ENV, SAIL_RE, envIntensityOf, sailEnvIntensity, SAIL_COAT, SPEC_OCC, overlayOffset, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
+import { FLOOD_LENS_MAX, LED_CELL, LED_COVER, LED_GLSL, LED_MAX, LED_R, setupStadiumMaterials } from "./stadium";
+import { splitByGroup, GROUND_ENV, OVERLAY_RE, SAIL_NIGHT_ENV, SAIL_RE, envIntensityOf, sailEnvIntensity, SAIL_COAT, SPEC_OCC, overlayOffset, soMinDefine, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
 
 it("patches three r186 lights_fragment_maps (lightmap blend, no diffuse IBL, env blend)", () => {
   const out = patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps);
@@ -83,8 +83,12 @@ it("A3: LED dots are pixel-footprint aware, never a hard step", () => {
   expect(LED_GLSL).not.toMatch(/step\( length\(/);
   expect(LED_GLSL).toContain(LED_COVER.toExponential(4));
 });
-it("A3: a plane crosses r=0.055 m dots in 1.1 m cells over (4/3) pi r^3 / 1.1^3 of its area", () => {
-  expect(LED_COVER).toBeCloseTo((4 / 3) * Math.PI * 0.055 ** 3 / 1.1 ** 3, 12);
+it("A3: 3D dot lattice matches the Cycles 2D Voronoi (shell.py: 1.1 m cells, r 0.05 cell) in dots per m^2 and coverage", () => {
+  // a plane crosses spheres of radius r in cells c: 2r / c^3 dots per m^2 covering (4/3) pi r^3 / c^3 of it
+  expect(2 * LED_R / LED_CELL ** 3).toBeCloseTo(1 / 1.1 ** 2, 2);
+  expect(LED_COVER).toBeCloseTo(Math.PI * 0.055 ** 2 / 1.1 ** 2, 4);
+  expect(LED_COVER).toBeCloseTo((4 / 3) * Math.PI * LED_R ** 3 / LED_CELL ** 3, 12);
+  expect(LED_GLSL).toContain(`floor( pB / ${LED_CELL.toFixed(4)} )`);
 });
 it("A3: LED radiance stays below the bloom threshold, so single LEDs never bloom", () => {
   expect(LED_MAX).toBeLessThan(BLOOM.threshold);
@@ -101,4 +105,9 @@ it("A4: flood lens night emission is capped and the lens is single-sided", () =>
   expect(lens.userData.emNight).toBe(FLOOD_LENS_MAX);
   expect(lens.side).toBe(THREE.FrontSide);
   expect(other.userData.emNight).toBe(120);
+});
+it("A1/A5: the sail skin has its own, higher occlusion floor (the coarse night sail lightmap showed as blocks)", () => {
+  expect(SPEC_OCC.sailMin).toBeGreaterThan(SPEC_OCC.min);
+  expect(soMinDefine("sailLeds")).toBe(`#define SO_MIN ${SPEC_OCC.sailMin.toFixed(3)}`);
+  expect(soMinDefine(undefined)).toBe(`#define SO_MIN ${SPEC_OCC.min.toFixed(3)}`);
 });

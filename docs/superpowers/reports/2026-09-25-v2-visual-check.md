@@ -78,3 +78,54 @@ was calibrated against the full ambient. `CAM_Seat_212`: day mean **100.3** (Cyc
 (140.4), night 137.2 (171.9). The seats now sit at the treads' brightness. Tier hues are the aramcostadium.com
 swatches (Lower green, Club sand, Upper blue) at the Cycles seat luminance, so they are more saturated than
 Cycles' teal green by design.
+
+## Stage A result (Task 8 tuning; captures `renders/web_v2/v2a_*`, side-by-sides `pair_v2a_*.jpg`)
+
+| Camera | State | Cycles mean | web mean | ratio | Cycles clipped | web clipped | v1 ratio |
+|---|---|---:|---:|---:|---:|---:|---:|
+| CAM_Aerial_Dusk | day | 151.1 | 151.5 | **1.00** | 1.55 % | 2.55 % | 1.02 |
+| CAM_Aerial_Dusk | golden | 104.0 | 99.3 | 0.96 | 8.51 % | 9.47 % | 1.00 |
+| CAM_Aerial_Dusk | night | 61.2 | 48.3 | 0.79 | 2.10 % | 2.47 % | 0.89 |
+| CAM_Approach | day | 181.9 | 182.8 | **1.00** | 1.25 % | 2.47 % | 1.06 |
+| CAM_Approach | golden | 156.5 | 132.7 | 0.85 | 0.43 % | 0.64 % | 0.88 |
+| CAM_Approach | night | 121.5 | 72.3 | 0.60 | 2.10 % | 0.88 % | 0.69 |
+| CAM_Seat_212 | day | 105.6 | 100.3 | **0.95** | 0.00 % | 0.86 % | 1.47 |
+| CAM_Seat_212 | golden | 140.4 | 120.3 | 0.86 | 0.20 % | 0.90 % | 1.09 |
+| CAM_Seat_212 | night | 171.9 | 137.2 | 0.80 | 8.12 % | 4.16 % | 0.87 |
+
+**Acceptance**
+- Day frame means within ±15 % of Cycles: **met** (1.00 / 1.00 / 0.95).
+- Roof-glow clipped share, box (0.35, 0.32)–(0.59, 0.45) of `CAM_Aerial_Dusk` night: Cycles **3.44 %**, v1 14.4 %,
+  v2 **3.70 %** (target ±2 points): **met**.
+- Camera nudge (1.8 m, `CAM_Aerial_Dusk` night, aligned): popping **0.0056** against v1 0.0115, with 15× more LED dots
+  (below). The v1 halos that appeared and vanished are gone. What remains is 1–2 px dots flickering around the
+  metric's luma threshold, and the pattern stays the same between frames in the crops.
+- Performance, `CAM_Bowl` night, 3840×2160 drawing buffer (1920×1080 at DPR 2), measured synchronously
+  (tick + 1 px readPixels, since rAF is throttled in the background window): **10.1 ms/frame (~99 fps)**,
+  **1.56 M triangles**, **89 draw calls**. This machine may be faster than the M1 target.
+- Assets: **34.53 MB** (budget 35 MB).
+
+**Final constants**
+- `SPEC_OCC` K day 2.0 / golden 1.0 / night **0.5**, floor 0.1, sail skin floor **0.5**. The night K was lowered from
+  1.2 because the lit sails and podium lost all reflection at 1.2 (Approach night went black).
+- `ENV_INTENSITY`: ground 0.3, concourse/suite glass 0.3, grass 0.2, steel 0.5 (plan values met the day target).
+- `SAIL_NIGHT_ENV` **1.0**, so A5's fade is off. With A1 and the sail floor, the night sails match Cycles' lit grey skin,
+  and 0.5 made the Approach night sails black.
+- `FLOOD_LENS_MAX` 30. `BLOOM` threshold **16** (was 12): the `M_SignWhite` sign letters (night emission 14)
+  bloomed into a large blob at `CAM_Approach` night. Strength 0.35 and radius 0.15 are unchanged.
+- LEDs: the v1 3D lattice (1.1 m cells, r 0.055 m) put 0.052 % coverage on the skin, where Cycles draws 2D UV
+  Voronoi dots at 0.785 % (15× denser). The lattice is now cell **0.5463 m**, r **0.0674 m**, which matches Cycles'
+  dots per m² and coverage. The dot footprint is at least 1 px, and `LED_MAX` is **15** (below the bloom threshold).
+- `BOWL` day 0.223 / golden 0.269 / night 1 (measured, see A6).
+
+**Remaining gaps → Stage B candidates**
+- Night plaza and paving are dark where Cycles' glossy paving reflects the lit facade (`CAM_Approach` night 0.60).
+  The web reflects only the sky, and the `site_near` night lightmap is coarse. Bigger or denoised site lightmaps
+  (B2/B3) would help the lamp pools. Facade reflections would need screen-space or planar reflections, which is outside both stages.
+- Night sails show faint texel blocks from the 1024 px night sail lightmap, and the pitch is blotchy in golden and night
+  (2–6 % bake noise). B2 (denoise) and B3 (larger atlases) address both.
+- The podium columns, canopy columns and bridge piers are still missing (B1). The podium still reads as a flat
+  wall at `CAM_Approach`.
+- The upper-tier seats are blue (spec tier colours), where Cycles has uniform green seats. This is a product choice, not a fidelity bug.
+
+Stage B (rebake, 2–5 h) awaits the user's decision.

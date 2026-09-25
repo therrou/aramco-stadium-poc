@@ -16,7 +16,7 @@ import { clearTreeUniforms, makeTreeUniforms, updateTreeUniforms } from "./treeL
  * up to 11.5), so the whole frame bloomed into a milky haze. The threshold now sits above the brightest
  * non-emissive radiance, so only lamps, LEDs and lit windows bloom (night peaks 50-130).
  */
-export const BLOOM = { strength: 0.35, radius: 0.15, threshold: 12.0 };
+export const BLOOM = { strength: 0.35, radius: 0.15, threshold: 16.0 };
 /**
  * Blender renders with "AgX - Medium High Contrast"; three's AgX is the base look. The look is a contrast
  * about middle grey in AgX log space: AgX log of 0.18 is (log2(0.18) + 12.47) / 16.5 = 0.606.

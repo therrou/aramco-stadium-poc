@@ -2,7 +2,8 @@
 // Captures the 9 reference cam/state pairs and the nudge pair to renders/web_v2/<prefix>_*.png and
 // returns the frame metrics. See docs/superpowers/reports/2026-09-25-v2-visual-check.md (Method).
 const CAMS = ["CAM_Aerial_Dusk", "CAM_Approach", "CAM_Seat_212"], STATES = ["day", "golden", "night"];
-const pose = (c) => ({ eye: c.eye, target: c.target, hfov: c.hfov });
+// v3: Blender poses get the app's orbit pivot (same view), else the orbit clamp would move the camera
+const pose = (c) => window.__viewer.pivot({ eye: c.eye, target: c.target, hfov: c.hfov });
 
 async function show(v, cam, st) {
   const c = v.assets.cameras[cam];
@@ -46,7 +47,7 @@ export async function flightFrames(prefix, act, every = 12) {
 /** v3: jumps to a named Blender camera (orbit pivot as in the app) in a state and saves the frame. */
 export async function shot(name, cam, state, nudge) {
   const v = window.__viewer, c = v.assets.cameras[cam];
-  v.rig.jump({ eye: c.eye, target: c.target, hfov: c.hfov }, c.exposure);
+  v.rig.jump(pose(c), c.exposure);
   if (nudge) v.rig.jump(nudge(v.rig.pose()), c.exposure);
   v.setState(state);
   for (let k = 0; k < 10; k++) v.tick(0.5);

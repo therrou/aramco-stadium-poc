@@ -217,7 +217,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     setState: (s: State) => dispatch({ type: "lighting", lighting: s }),
     get night() { return lighting.t.night; }, tick: (dt = 1 / 60) => frame(dt),
     renderer, composer, camera, rig, lighting, stadium: a.stadium.scene, assets: a,
-    get app() { return app; }, dispatch, pickSeat,
+    get app() { return app; }, dispatch, pickSeat, pivot: pivotOf,
     /** v2 Task 1: metrics of the next rendered frame (drawing buffer is read in the same task as the render). */
     stats: (box?: Box) => {
       frame(0);

@@ -149,3 +149,39 @@ Stage B (rebake, 2–5 h) awaits the user's decision.
 Not verified live: "Copy link" writing to the clipboard (the background window has no clipboard focus); the
 "Link copied" state is wired to the promise. The interaction GIF was not exported, because it would be a browser
 download.
+
+## v3 (branch `web-viewer-v3`): camera routes and detail pass
+
+Captures `renders/web_v2/v3b_*` (Blender poses with the app's orbit pivot; same view), side-by-sides `pair_v3b_*.jpg`.
+
+| Camera | State | Cycles mean | web mean | ratio | Cycles clipped | web clipped | v2 ratio |
+|---|---|---:|---:|---:|---:|---:|---:|
+| CAM_Aerial_Dusk | day | 151.1 | 151.7 | **1.00** | 1.55 % | 2.57 % | 1.00 |
+| CAM_Aerial_Dusk | golden | 104.0 | 102.6 | 0.99 | 8.51 % | 9.48 % | 0.96 |
+| CAM_Aerial_Dusk | night | 61.2 | 52.1 | 0.85 | 2.10 % | 2.47 % | 0.79 |
+| CAM_Approach | day | 181.9 | 182.8 | **1.00** | 1.25 % | 2.65 % | 1.00 |
+| CAM_Approach | golden | 156.5 | 138.7 | 0.89 | 0.43 % | 0.92 % | 0.85 |
+| CAM_Approach | night | 121.5 | 74.8 | 0.62 | 2.10 % | 1.16 % | 0.60 |
+| CAM_Seat_212 | day | 105.6 | 101.4 | **0.96** | 0.00 % | 0.86 % | 0.95 |
+| CAM_Seat_212 | golden | 140.4 | 123.1 | 0.88 | 0.20 % | 0.90 % | 0.86 |
+| CAM_Seat_212 | night | 171.9 | 140.2 | 0.82 | 8.12 % | 5.43 % | 0.80 |
+
+Roof-glow clipped share: Cycles 3.44 %, v3 3.73 %. Nudge popping 0.0055 (v1 0.0115).
+Worst case over every camera and every section's seat view: **1.98 M triangles, 91 draw calls**. Frame time
+10.6-12.5 ms at a 3200×1800 buffer on this machine. Assets **34.78 MB**.
+
+What changed visually:
+- The pitch uses Blender's procedural grass, live and crisp at any distance.
+- The goal has a cord-mesh net, and its posts are no longer black.
+- Moulded seats near the camera; the far stands show treads and seat rows instead of flat slabs.
+- The concrete has mottling and speckle.
+- The night sails are smooth, with no texel blocks.
+- The ground has detail and anti-tiling, and a warm podium glow at night.
+- Leaves are anti-aliased, and the impostors blend their frames.
+- All lightmaps are OIDN-denoised and sampled bicubic.
+
+Remaining gaps:
+- The plaza at Approach night (0.62). Cycles' glossy paving reflects the lit facade, which needs a planar-reflection
+  pass.
+- The far-site lamp pools are single lightmap texels (2.5-6.5 m).
+- The underside of the roof and the steel keep their 1024 px bakes.

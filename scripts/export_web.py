@@ -71,22 +71,6 @@ def _check_materials(objs):
         raise RuntimeError(f"objects without a material: {missing}")
 
 
-def relink_materials(report=None):
-    """Re-attach each WebExport object's '.web' material (fix for the site/site_near split) and
-    re-export stadium.glb, keeping the baked LightmapUVs."""
-    from webexport import gltfout, webscene
-    objs = [o for o in bpy.data.scenes[webscene.WEB].objects if o.get("webexport")]
-    fixed = []
-    for o in objs:
-        m = o.data.materials[0] if o.data.materials else None
-        if m is None:
-            o.data.materials[0] = bpy.data.materials[o["srcMat"] + ".web"]
-            fixed.append(o.name)
-    _check_materials(objs)
-    gltfout.export_glb(objs, os.path.join(RAW, "stadium.glb"))
-    return fixed
-
-
 def stage_geometry(report, quality):
     from webexport import budget, gltfout, manifest, matinfo, webscene
     objs = webscene.build()
@@ -194,11 +178,18 @@ STAGES = {"data": stage_data, "geometry": stage_geometry, "surfaces": stage_surf
           "trees": stage_trees}
 
 
-def run(stages=("data", "geometry", "surfaces", "bake", "trees"), quality="draft"):
+def run(stages=("data", "geometry", "surfaces", "bake", "trees"), quality="draft", samples=None):
+    """Shipped assets: run(stages=("data", "geometry", "surfaces", "bake", "trees"), quality="draft",
+    samples=256). `samples` overrides the lightmap bake's sample count only (stage "bake")."""
     _reload()
-    report = {"quality": quality}
+    report = {"quality": quality, "samples": samples}
     for s in stages:
-        STAGES[s](report) if s == "data" else STAGES[s](report, quality)
+        if s == "data":
+            STAGES[s](report)
+        elif s == "bake":
+            STAGES[s](report, quality, samples=samples)
+        else:
+            STAGES[s](report, quality)
     with open(os.path.join(RAW, "report.json"), "w") as f:
         json.dump(report, f, indent=1)
     return report

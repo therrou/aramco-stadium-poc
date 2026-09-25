@@ -98,14 +98,34 @@ permission prompt. If you see that, run it from Terminal.app directly:
 
 ## Web viewer (phase 2)
 
-Export (inside the open Blender session, via the MCP; never headless here):
+Prerequisites:
+
+- Blender 5.2 open with `blender/aramco_stadium.blend` and the Blender MCP add-on connected. The export
+  runs inside that session through the MCP (headless `blender -b` hangs on this machine). It reads the
+  render scene "Scene" and never modifies or saves it.
+- KTX-Software 4.4.2 (`ktx`) extracted into `tools/ktx/bin` and `tools/ktx/lib`, exactly as the header
+  comment of `scripts/optimize_web.sh` describes (no installer, no sudo; `tools/` is gitignored).
+- A Python venv for the host tests and the size check:
+  `python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt`.
+- Node (tested with 23) and network access: `optimize_web.sh` runs `npx @gltf-transform/cli@4.5.0`
+  (and the matching `@gltf-transform/core|functions|extensions@4.5.0`), and `web/` needs `npm install`.
+
+Export exactly as shipped (in the Blender session, via the MCP; the bakes take roughly 2-3 h):
 
     import sys; sys.path.insert(0, "<repo>/scripts")
-    import export_web; export_web.run(quality="draft")     # or "full" (~2-3 h of bakes)
+    import export_web
+    export_web.run(stages=("data", "geometry", "surfaces", "bake", "trees"), quality="draft", samples=256)
+
+`quality="draft"` sets the UV layout and atlas sizes (scale 0.5) and the surface bakes; `samples=256`
+raises only the lightmap bake's samples. `quality="full"` uses the same scale (ruling R9) but also
+bakes the surface textures at higher samples, so it is close to, not identical with, the shipped assets.
+Stages can be run on their own (e.g. `stages=("bake",)`), but the UV layout and the export scenes live
+only in the open session: after a Blender restart, rerun every stage from "geometry" on
+(`stages=("geometry", "surfaces", "bake", "trees")`); "data" needs no Blender state.
 
 Then:
 
-    scripts/optimize_web.sh            # build/web_raw -> web/public/assets, fails above 35 MB
+    scripts/optimize_web.sh            # build/web_raw -> web/public/assets, fails above 35 MB (35e6 bytes)
     cd web && npm install && npm run dev
 
 URL parameters: `state=day|golden|night`, `cam=<Blender camera name>`, `size=1920x1080`, `stats=1`.

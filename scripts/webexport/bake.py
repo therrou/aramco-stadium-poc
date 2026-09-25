@@ -9,7 +9,10 @@ import numpy as np
 from . import groups, rgbm, texel, uvpack, webscene
 
 RAW = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "build", "web_raw")
-QUALITY = {"draft": {"scale": 0.5, "samples": 64}, "full": {"scale": 1.0, "samples": 256}}
+# Ruling R9: "full" keeps the draft UV layout and atlas sizes (scale 0.5); only samples rise. Full-res
+# atlases (scale 1.0) would add ~40 MB and break the 35 MB budget. The shipped assets were baked with
+# quality="draft", samples=256 (surfaces at draft samples); see README "Web viewer (phase 2)".
+QUALITY = {"draft": {"scale": 0.5, "samples": 64}, "full": {"scale": 0.5, "samples": 256}}
 # texel.atlas_size upper bound per group (size-budget knob 3; None = texel.atlas_size default)
 ATLAS_HI = {}
 

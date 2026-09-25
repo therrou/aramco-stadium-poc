@@ -25,3 +25,8 @@ def test_resolve_samples_override_does_not_touch_scale():
     bake.resolve_samples("draft", 256)
     assert bake.QUALITY["draft"] is q
     assert bake.QUALITY["draft"]["scale"] == 0.5
+
+
+def test_full_quality_shares_the_draft_atlas_scale():
+    # ruling R9: a "full" bake must stay UV/atlas-compatible with the shipped (draft-layout) assets
+    assert bake.QUALITY["full"]["scale"] == bake.QUALITY["draft"]["scale"] == 0.5

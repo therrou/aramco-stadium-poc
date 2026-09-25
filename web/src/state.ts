@@ -1,24 +1,33 @@
 import { STATES, type State } from "./loader";
+import type { SeatRef } from "./seatsData";
 
-export type View = { kind: "overview" } | { kind: "section"; section: number };
-export interface AppState { view: View; lighting: State }
+export type View = { kind: "overview" } | { kind: "seat"; seat: SeatRef };
+export interface AppState { view: View; lighting: State; autoOrbit: boolean }
 export type Action =
-  | { type: "section"; section: number }
+  | { type: "seat"; seat: SeatRef }
   | { type: "back" }
   | { type: "lighting"; lighting: State }
+  | { type: "camera"; camera: string }      // a hero view or a mode-bar camera
+  | { type: "autoOrbit"; on: boolean }
   | { type: "none" };
 
-export const initialState: AppState = { view: { kind: "overview" }, lighting: "golden" };
+export const initialState: AppState = { view: { kind: "overview" }, lighting: "golden", autoOrbit: false };
+export const sameSeat = (a: SeatRef, b: SeatRef) => a.section === b.section && a.row === b.row && a.seat === b.seat;
 
 export function reduce(s: AppState, a: Action): AppState {
   switch (a.type) {
-    case "section":
-      if (s.view.kind === "section" && s.view.section === a.section) return s;
-      return { ...s, view: { kind: "section", section: a.section } };
+    case "seat":
+      if (s.view.kind === "seat" && sameSeat(s.view.seat, a.seat)) return s;
+      return { ...s, view: { kind: "seat", seat: a.seat }, autoOrbit: false };
     case "back":
       return s.view.kind === "overview" ? s : { ...s, view: { kind: "overview" } };
     case "lighting":
       return s.lighting === a.lighting ? s : { ...s, lighting: a.lighting };
+    case "camera":
+      return { ...s, view: { kind: "overview" }, autoOrbit: false };
+    case "autoOrbit":
+      if (a.on === s.autoOrbit || (a.on && s.view.kind === "seat")) return s;
+      return { ...s, autoOrbit: a.on };
     default:
       return s;
   }

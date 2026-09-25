@@ -32,5 +32,6 @@ it("A6: inside the bowl the outdoor light is scaled by the measured per-state bo
   updateTreeUniforms(u, 0, cam);
   expect(u.uBowl.value).toBe(BOWL.day);
   // ambient + sun are scaled inside the shell only (floodMask); the flood term is not
-  expect(OUTDOOR_IRRADIANCE).toContain("( PI * uAmbient + uSun * max( dot( geometryNormal, uSunDirView ), 0.0 ) ) * mix( 1.0, uBowl, floodMask( vFloodPos ) )");
+  expect(OUTDOOR_IRRADIANCE).toContain("bowlK = mix( 1.0, uBowl, floodMask( vFloodPos ) )");
+  expect(OUTDOOR_IRRADIANCE).toContain("PI * uAmbient * bowlK");
 });

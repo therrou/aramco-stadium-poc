@@ -75,3 +75,10 @@ it("D7: moulded seats go to the nearest sections first, within a seat budget (tr
     expect(worst).toBeLessThanOrEqual(NEAR_SEAT_CAP);
   }
 });
+it("S1: setVisibleSections reports whether the drawn seats changed (the shadow map re-renders then)", () => {
+  const t = { count: 2, section: new Uint16Array([101, 201]), row: new Uint8Array(2), seat: new Uint16Array(2), pos: new Float32Array(6), yaw: new Float32Array(2) };
+  const f = new SeatField(t, new Map([[101, { start: 0, end: 1 }], [201, { start: 1, end: 2 }]]), doc.sections);
+  expect(f.setVisibleSections(new Set([101]))).toBe(true);
+  expect(f.setVisibleSections(new Set([101]))).toBe(false);
+  expect(f.setVisibleSections(new Set([101]), new Set([101]))).toBe(true);
+});

@@ -15,8 +15,9 @@ import { nearestSeatToRay } from "./seatPick";
 import { DepthProbe, acceptPatchHit, onClick } from "./picking";
 import { reduce, initialState, parseLighting, type Action, type AppState } from "./state";
 import { STATES, type State } from "./loader";
-import { setupStadiumMaterials, specOccK, type SharedUniforms } from "./stadium";
+import { GROUND_RE, setupStadiumMaterials, specOccK, type SharedUniforms } from "./stadium";
 import { Lighting, makeComposer } from "./lighting";
+import { SunShadow } from "./sunShadow";
 import { missingLightmaps } from "./lightingState";
 import { setupTrees } from "./trees";
 import { heroesIn } from "./heroViews";
@@ -93,12 +94,38 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   });
   const startState = parseLighting(params.get("state"));
   const lighting = new Lighting(renderer, scene, a, groups, [...emissive], startState, shared, useLightmaps);
+  // S1 (v3): live sun shadows sharpen the baked sun (lightmapped materials) and shade the seats and trees
+  shared.uSun = lighting.outdoor.uSun;
+  shared.uSunDirView = lighting.outdoor.uSunDirView;
+  shared.uAmbient = lighting.outdoor.uAmbient;
+  const sun = useLightmaps ? new SunShadow(renderer, scene) : null;
+  a.stadium.scene.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    const mat = m.material as THREE.Material;
+    m.receiveShadow = true;
+    // The sails cast: they block the direct beam (their diffuse translucency is in the bake, which the
+    // sharpening leaves alone), so direct sun reaches the bowl only through the oculus, as in Cycles.
+    // Ground planes only receive: the site's plaza/lawn plane runs under the bowl just above the pitch and
+    // hid it from the sun in the shadow map.
+    m.castShadow = !mat.transparent && !/Glass|Net/.test(mat.name) && !GROUND_RE.test(mat.name)
+      && !/^M_(RoadLine|StreetGlow|DeckUnder|PodiumStrip|PitchSurround|Grass|LineWhite)\b/.test(mat.name);
+  });
   const seats = new SeatField(table, idx, a.sections.sections, lighting.outdoor);
   const tierOf = new Map(a.sections.sections.map((s) => [Number(s.id), s.tier as Tier]));
   const patches = new SectionPatches(table, idx, lighting.outdoor, (id) => tierOf.get(id));
   const highlight = new SeatHighlight();
   scene.add(seats.mesh, seats.near, patches.mesh, highlight.mesh);
-  if (a.trees) { setupTrees(a.trees, a.impostors, lighting.outdoor); scene.add(a.trees.scene); }
+  for (const m of [seats.mesh, seats.near]) { m.castShadow = true; m.receiveShadow = true; }
+  patches.mesh.receiveShadow = true;
+  if (a.trees) {
+    setupTrees(a.trees, a.impostors, lighting.outdoor);
+    a.trees.scene.traverse((o) => {          // S1: tree meshes cast; impostor billboards (shader material) do not
+      const m = o as THREE.Mesh;
+      if (m.isMesh) { m.castShadow = !(m.material as THREE.ShaderMaterial).isShaderMaterial; m.receiveShadow = true; }
+    });
+    scene.add(a.trees.scene);
+  }
   const composer = makeComposer(renderer, scene, camera);
   const perf = new Perf(params.has("stats"));
   // Review Focus 5: size to the stage (the sidebar or bottom sheet takes the rest), not to the window
@@ -206,10 +233,12 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     }
     const focus = app.view.kind === "seat" ? app.view.seat.section : -1;
     const vis = visibleSections(toBlender(camera.position), a.sections.sections, SEAT_LOD_DIST, focus);
-    seats.setVisibleSections(vis, nearSections(toBlender(camera.position), a.sections.sections, SEAT_NEAR_M, NEAR_SEAT_CAP));
+    if (seats.setVisibleSections(vis, nearSections(toBlender(camera.position), a.sections.sections, SEAT_NEAR_M, NEAR_SEAT_CAP)) && sun)
+      renderer.shadowMap.needsUpdate = true;             // the drawn seats changed: their shadows too
     patches.setHidden(vis);
     highlight.update(now / 1000);
     lighting.update(dt, rig.exposure, camera);
+    sun?.update(lighting.t.night);
     composer.render(dt);
   };
 

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { MAX_CHARTS, chartUniforms, chartsOfMesh, pitchLinesGlsl, type Chart } from "./pitchLines";
 import { STATE_NIGHT } from "./lightingState";
+import { SUN_VIS_GLSL } from "./sunShadow";
 import { BICUBIC_GLSL, CONCRETE_GLSL, GRASS_GLSL, GROUND_GLSL, GROUND_MAP_GLSL, NET, NET_GLSL, detailFor } from "./detail";
 
 const LM_RE = /vec4 lightMapTexel = texture2D\( lightMap, vLightMapUv \);\s*vec3 lightMapIrradiance = lightMapTexel\.rgb \* lightMapIntensity;/;
@@ -57,6 +58,17 @@ export function patchLightsChunk(chunk: string) {
     .replace(LM_RE, `vec3 lightMapIrradiance = mix( rgbmDecode( texBicubic( lightMap, vLightMapUv ) ), rgbmDecode( texBicubic( uLmB, vLightMapUv ) ), uLmBlend ) * lightMapIntensity;
 #ifdef SAIL_SKIN
 	lightMapIrradiance = mix( lightMapIrradiance, sailNightIrradiance( vWorldPosB ), smoothstep( 0.6, 1.0, uNight ) );
+#endif
+#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+	{   // S1 (v3): outside the shell, swap the bake's (blurred) direct sun for the live one. The sky share is
+		// estimated from the outdoor model's ambient; what the texel has above it is baked direct sun (vb)
+		vec3 es = uSun * max( dot( geometryNormal, uSunDirView ), 0.0 );
+		float esl = dot( es, vec3( 0.2126, 0.7152, 0.0722 ) ), el = dot( lightMapIrradiance, vec3( 0.2126, 0.7152, 0.0722 ) );
+		float sky = min( el, PI * dot( uAmbient, vec3( 0.2126, 0.7152, 0.0722 ) ) );
+		float vb = esl > 1e-4 ? clamp( ( el - sky ) / esl, 0.0, 1.0 ) : 0.0;
+		vec3 live = max( lightMapIrradiance - es * vb, vec3( 0.0 ) ) + es * sunVisibility();
+		lightMapIrradiance = mix( lightMapIrradiance, live, outsideShell( vWorldPosB ) );
+	}
 #endif`)
     .replace(IBL_IRR_RE, "")
     .replace(IBL_RAD_RE, `#ifdef USE_LIGHTMAP
@@ -73,6 +85,7 @@ uniform sampler2D uLmB; uniform float uLmBlend; uniform float uRgbmRange;
 uniform sampler2D uEnvB; uniform float uEnvBlend; uniform float uNight;
 varying vec3 vWorldPosB;
 vec3 rgbmDecode( vec4 c ) { return c.rgb * c.a * uRgbmRange; }
+uniform vec3 uSun; uniform vec3 uSunDirView; uniform vec3 uAmbient;   // S1: the sun and sky as in treeLight
 ${BICUBIC_GLSL}
 ${SAIL_NIGHT_GLSL}
 uniform float uSoK;
@@ -126,7 +139,10 @@ float sailLeds( vec3 pB ) {
 }
 `;
 
-export interface SharedUniforms { uLmBlend: { value: number }; uEnvB: { value: THREE.Texture | null }; uEnvBlend: { value: number }; uRgbmRange: { value: number }; uNight: { value: number }; uSoK: { value: number } }
+export interface SharedUniforms {
+  /** S1: the sun (irradiance and view-space direction), shared with the outdoor model; set by main.ts. */
+  uSun?: { value: THREE.Color }; uSunDirView?: { value: THREE.Vector3 }; uAmbient?: { value: THREE.Color };
+  uLmBlend: { value: number }; uEnvB: { value: THREE.Texture | null }; uEnvBlend: { value: number }; uRgbmRange: { value: number }; uNight: { value: number }; uSoK: { value: number } }
 /** Full uniform set seen by a stadium material: the shared ones plus its own second lightmap. */
 export interface LightingUniforms extends SharedUniforms { uLmB: { value: THREE.Texture | null } }
 
@@ -292,6 +308,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
         .replace("#include <common>", "#include <common>\nvarying vec3 vWorldPosB;")
         .replace("#include <worldpos_vertex>", "#include <worldpos_vertex>\nvec4 wpB = modelMatrix * vec4( transformed, 1.0 ); vWorldPosB = vec3( wpB.x, -wpB.z, wpB.y );");
       s.fragmentShader = s.fragmentShader
+        .replace("#include <shadowmap_pars_fragment>", "#include <shadowmap_pars_fragment>\n" + SUN_VIS_GLSL)
         .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + soMinDefine(ex.special) + PARS + (ex.special === "sailLeds" ? LED_GLSL : "")
           + (lines ? pitchLinesGlsl(lineCharts!.length) : ""))
         .replace("#include <lights_fragment_maps>", lightsChunkFor(chunk, useLightmaps, lines, detail));

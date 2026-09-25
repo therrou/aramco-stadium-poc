@@ -185,3 +185,20 @@ Remaining gaps:
   pass.
 - The far-site lamp pools are single lightmap texels (2.5-6.5 m).
 - The underside of the roof and the steel keep their 1024 px bakes.
+
+## v3 part 3: live sun shadows (S1/S2)
+
+- One sun shadow map (4096², ±340 m around the stadium, ~17 cm per texel). It is rendered only when the sun moves
+  (lighting transitions) or the drawn seat set changes, not every frame. Cost: +1.5-2 ms per frame at 3200×1800
+  (11.7-14.3 ms across CAM_Bowl, CAM_Seat_101, CAM_Aerial_SW and CAM_Approach), and 14.1 ms during a transition.
+- **S2 ruling: live shadows apply only outside the shell.** Inside it, the roof blocks the direct beam at the day
+  (24°) and golden (2°) sun angles. In Cycles the bowl is lit by the sky and by the sails' diffuse translucency
+  (`shell._add_translucency`, 35 % by day), which the bake has right. Applying live shadows there made the pitch
+  35 % darker than Cycles, so the bowl keeps the bake.
+- Outside, the bake's (blurred, 6.5 m) direct sun is swapped for the live one. The sky share is estimated from the
+  outdoor model's ambient, and what the texel has above it is treated as baked direct sun. Tree, palm and podium
+  shadows get sharp edges, and the blurred halos in the bake go away.
+- In this scene the effect is subtle: at 24° the direct sun on flat ground is ~1.15 of ~3.5 units of total light,
+  so a full shadow is about a third darker.
+- Casters are the stadium (except glass, the net, and ground planes), the seats and the tree meshes. The site's
+  plaza/lawn plane runs under the bowl and had hidden the pitch from the sun until it stopped casting.

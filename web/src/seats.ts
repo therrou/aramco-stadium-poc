@@ -139,9 +139,9 @@ export class SeatField {
    * ~1.1M triangles per frame). Instance ids are therefore not seat indices. Sections in `near` go to
    * the moulded-seat mesh, the rest to the block mesh (D7).
    */
-  setVisibleSections(ids: Set<number>, near: Set<number> = new Set()) {
+  setVisibleSections(ids: Set<number>, near: Set<number> = new Set()): boolean {
     const cur = this.visible, same = (a: Set<number>, b: Set<number>) => a.size === b.size && [...a].every((i) => b.has(i));
-    if (cur && same(ids, cur) && same(near, this.nearIds)) return;
+    if (cur && same(ids, cur) && same(near, this.nearIds)) return false;
     this.visible = ids;
     this.nearIds = near;
     const fill = (mesh: THREE.InstancedMesh, pick: (id: number) => boolean) => {
@@ -160,5 +160,6 @@ export class SeatField {
     };
     fill(this.near, (id) => near.has(id));
     fill(this.mesh, (id) => !near.has(id));
+    return true;
   }
 }

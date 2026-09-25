@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { toThree } from "./coords";
 import { sunColor, sunStrength, sunToward, STATE_NIGHT } from "./lightingState";
+import { SUN_VIS_GLSL } from "./sunShadow";
 
 /**
  * Outdoor light for everything that is not lightmapped (trees, seats, section patches): Blender's sun
@@ -75,7 +76,10 @@ export function clearTreeUniforms(u: TreeUniforms) {
  * added as-is: radiance = albedo * sun * N.L / PI, matching the baked surfaces. uAmbient is a sky radiance
  * over the hemisphere, hence PI * uAmbient. (The brief had PI * (ambient + sun): ~3x too bright next to the bake.)
  */
-export const OUTDOOR_IRRADIANCE = "irradiance += ( PI * uAmbient + uSun * max( dot( geometryNormal, uSunDirView ), 0.0 ) ) * mix( 1.0, uBowl, floodMask( vFloodPos ) );\n" +
+// S1 (v3): outside the shell, inside the live shadow map, the sun term takes its visibility (S2: the bowl keeps
+// the measured bowl factor)
+export const OUTDOOR_IRRADIANCE = "float bowlK = mix( 1.0, uBowl, floodMask( vFloodPos ) ), sunV = mix( bowlK, sunVisibility(), sunInShadowMap() * ( 1.0 - floodMask( vFloodPos ) ) );\n" +
+  "irradiance += PI * uAmbient * bowlK + uSun * max( dot( geometryNormal, uSunDirView ), 0.0 ) * sunV;\n" +
   // floodlights: from above the ring, so up-facing surfaces get the full term, vertical ones ~60 %
   "irradiance += uFlood * floodMask( vFloodPos ) * ( 0.6 + 0.4 * max( dot( geometryNormal, uUpView ), 0.0 ) );";
 /** GLSL twin of floodMask (three world position: plan is x, -z). */
@@ -87,7 +91,7 @@ float floodMask( vec3 w ) {
 
 /** D7 (v3): a Blinn-Phong sun highlight for glossy plastic (seats); no IBL on these materials. */
 export const sunSpecular = (s: { shine: number; strength: number }) =>
-  `\nreflectedLight.directSpecular += uSun * ${s.strength.toFixed(3)} * pow( max( dot( geometryNormal, normalize( uSunDirView + geometryViewDir ) ), 0.0 ), ${s.shine.toFixed(1)} ) * max( dot( geometryNormal, uSunDirView ), 0.0 ) * mix( 1.0, uBowl, floodMask( vFloodPos ) );`;
+  `\nreflectedLight.directSpecular += uSun * ${s.strength.toFixed(3)} * pow( max( dot( geometryNormal, normalize( uSunDirView + geometryViewDir ) ), 0.0 ), ${s.shine.toFixed(1)} ) * max( dot( geometryNormal, uSunDirView ), 0.0 ) * sunV;`;
 
 /**
  * Adds the outdoor sun + ambient to a MeshStandardMaterial. Composes with an existing onBeforeCompile
@@ -107,6 +111,7 @@ floodW = instanceMatrix * floodW;
 #endif
 vFloodPos = ( modelMatrix * floodW ).xyz;`);
     s.fragmentShader = s.fragmentShader
+      .replace("#include <shadowmap_pars_fragment>", "#include <shadowmap_pars_fragment>\n" + SUN_VIS_GLSL)
       .replace("#include <common>", "#include <common>\nuniform vec3 uSunDirView; uniform vec3 uSun; uniform vec3 uAmbient; uniform vec3 uFlood; uniform vec3 uUpView; uniform float uBowl;\nvarying vec3 vFloodPos;\n" + FLOOD_GLSL)
       .replace("#include <lights_fragment_maps>", "#include <lights_fragment_maps>\n" + OUTDOOR_IRRADIANCE + (spec ? sunSpecular(spec) : ""));
   };

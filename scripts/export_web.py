@@ -65,6 +65,28 @@ def stage_data(report):
     report.update(seats=len(rows), sections=len(sections), seats_bin_bytes=len(blob))
 
 
+def _check_materials(objs):
+    missing = [o.name for o in objs if not o.data.materials or o.data.materials[0] is None]
+    if missing:
+        raise RuntimeError(f"objects without a material: {missing}")
+
+
+def relink_materials(report=None):
+    """Re-attach each WebExport object's '.web' material (fix for the site/site_near split) and
+    re-export stadium.glb, keeping the baked LightmapUVs."""
+    from webexport import gltfout, webscene
+    objs = [o for o in bpy.data.scenes[webscene.WEB].objects if o.get("webexport")]
+    fixed = []
+    for o in objs:
+        m = o.data.materials[0] if o.data.materials else None
+        if m is None:
+            o.data.materials[0] = bpy.data.materials[o["srcMat"] + ".web"]
+            fixed.append(o.name)
+    _check_materials(objs)
+    gltfout.export_glb(objs, os.path.join(RAW, "stadium.glb"))
+    return fixed
+
+
 def stage_geometry(report, quality):
     from webexport import budget, gltfout, manifest, matinfo, webscene
     objs = webscene.build()
@@ -73,8 +95,12 @@ def stage_geometry(report, quality):
         info = matinfo.classify(bpy.data.materials[o["srcMat"]])
         if info["kind"] == "tiled" and info["tile"]:
             webscene.planar_uv(o, info["tile"])
-        mats[o.name] = gltfout.web_material(info, {})
-        o.data.materials[0] = mats[o.name]
+        # one '.web' material per source material: web_material() replaces an existing one, so a
+        # second call for site_near__X deleted the material of site__X (glb: default white material)
+        if o["srcMat"] not in mats:
+            mats[o["srcMat"]] = gltfout.web_material(info, {})
+        o.data.materials[0] = mats[o["srcMat"]]
+    _check_materials(objs)
     tris = webscene.triangles(objs)
     path = os.path.join(RAW, "stadium.glb")
     gltfout.export_glb(objs, path)
@@ -138,6 +164,9 @@ def stage_surfaces(report, quality):
                 continue
             baked = bake.bake_surface(o, info, q["scale"], q["samples"])
             o.data.materials[0] = gltfout.web_material(info, baked)
+            for other in objs:                      # objects sharing the source material keep it
+                if other is not o and other["srcMat"] == o["srcMat"]:
+                    other.data.materials[0] = o.data.materials[0]
             done.append((o.name, sorted(k for k in baked if k != "emNight"), baked.get("emNight")))
     finally:
         webscene.set_state(night0)                  # the render scene ends as it started

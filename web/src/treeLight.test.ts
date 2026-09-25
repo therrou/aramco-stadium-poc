@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import * as THREE from "three";
-import { FLOOD, FLOOD_GLSL, OUTDOOR_IRRADIANCE, floodMask, makeTreeUniforms, shellRadius, updateTreeUniforms } from "./treeLight";
+import { FLOOD, FLOOD_GLSL, OUTDOOR_IRRADIANCE, BOWL, bowlFactor, floodMask, makeTreeUniforms, shellRadius, updateTreeUniforms } from "./treeLight";
 
 it("floodlight mask: full inside the bowl, zero outside the shell", () => {
   expect(floodMask(0, 0)).toBe(1);
@@ -21,4 +21,16 @@ it("floodlight irradiance scales with night and is zero by day", () => {
 it("the shader term uses the same superellipse", () => {
   expect(FLOOD_GLSL).toContain(`abs( w.x / ${FLOOD.a.toFixed(1)} )`);
   expect(OUTDOOR_IRRADIANCE).toContain("floodMask( vFloodPos )");
+});
+
+it("A6: inside the bowl the outdoor light is scaled by the measured per-state bowl factor", () => {
+  expect(bowlFactor(0)).toBe(BOWL.day);
+  expect(bowlFactor(0.6)).toBeCloseTo(BOWL.golden, 9);
+  expect(bowlFactor(1)).toBe(BOWL.night);
+  const u = makeTreeUniforms(), cam = new THREE.PerspectiveCamera();
+  cam.updateMatrixWorld();
+  updateTreeUniforms(u, 0, cam);
+  expect(u.uBowl.value).toBe(BOWL.day);
+  // ambient + sun are scaled inside the shell only (floodMask); the flood term is not
+  expect(OUTDOOR_IRRADIANCE).toContain("( PI * uAmbient + uSun * max( dot( geometryNormal, uSunDirView ), 0.0 ) ) * mix( 1.0, uBowl, floodMask( vFloodPos ) )");
 });

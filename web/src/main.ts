@@ -6,7 +6,7 @@ import { hideOverlay, showError, showFatal, showProgress, renderPanel } from "./
 import { toBlender, type V3 } from "./coords";
 import { imageStats, type Box } from "./frameStats";
 import { parseSeats, indexSections } from "./seatsData";
-import { mockAvailability } from "./availability";
+import type { Tier } from "./tiers";
 import { SeatField, visibleSections, SEAT_LOD_DIST } from "./seats";
 import { SectionPatches } from "./sectionPatches";
 import { CameraRig } from "./camera";
@@ -62,7 +62,6 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const scene = new THREE.Scene();
   scene.add(a.stadium.scene);
   const table = parseSeats(a.seatsBin), idx = indexSections(table);
-  const avail = mockAvailability(table, idx);
   const rig = new CameraRig(renderer.domElement);
   const overview = cameraPose(a.cameras["CAM_Aerial_SW"]);
   // final review 2: exposure follows each flight; back at the overview it is CAM_Aerial_SW's, not ?cam's
@@ -87,9 +86,9 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   });
   const startState = parseLighting(params.get("state"));
   const lighting = new Lighting(renderer, scene, a, groups, [...emissive], startState, shared, useLightmaps);
-  const seats = new SeatField(table, idx, a.sections.sections, avail, lighting.outdoor);
-  const tierOf = new Map(a.sections.sections.map((s) => [Number(s.id), s.tier as string]));
-  const patches = new SectionPatches(table, idx, avail, lighting.outdoor, (id) => tierOf.get(id));
+  const seats = new SeatField(table, idx, a.sections.sections, lighting.outdoor);
+  const tierOf = new Map(a.sections.sections.map((s) => [Number(s.id), s.tier as Tier]));
+  const patches = new SectionPatches(table, idx, lighting.outdoor, (id) => tierOf.get(id));
   scene.add(seats.mesh, patches.mesh);
   if (a.trees) { setupTrees(a.trees, a.impostors, lighting.outdoor); scene.add(a.trees.scene); }
   const composer = makeComposer(renderer, scene, camera);
@@ -145,7 +144,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     if (v.kind === "section") {
       const { start, end } = idx.get(v.section)!;
       total = end - start;
-      for (let i = start; i < end; i++) available += avail[i] === 0 ? 1 : 0;
+      available = total;   // v2: no mock availability (panel replaced in Task 14)
     }
     renderPanel(app, { sectionLabel: sec?.id, tier: sec?.tier, available, total }, {
       lighting: (l) => dispatch({ type: "lighting", lighting: l }),

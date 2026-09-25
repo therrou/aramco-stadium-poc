@@ -61,3 +61,20 @@ The lenses are still visible from inside the bowl (`CAM_Bowl` night), so FrontSi
 Mips on every lightmap group came to 37.21 MB (budget 35 MB). zstd 22 gave 37.19 and UASTC RDO λ 0.5–1 saved 4–7 %
 per file, so neither was enough. Only the far `site` lightmaps (all 3 states, 11 levels, trilinear) carry mips:
 **34.53 MB** total. The other groups are single-level, as before.
+
+## After A6 (tier colours, bowl factor)
+
+`scripts/webexport/measure_bowl.py` (the FLOOD method on the up-facing treads of `bowl__M_Concrete`):
+
+| State | open treads mean | roofed treads mean | all mean | web model (ambient + sun) | bowl factor |
+|---|---:|---:|---:|---:|---:|
+| day | 0.70 | 0.84 | 0.80 | 3.59 | **0.223** |
+| golden | 0.84 | 0.91 | 0.89 (flood 0.48 subtracted) | 1.53 | **0.269** |
+
+The plan expected only the roof to shade the sun. The bake shows the whole bowl gets ~¼ of the open-sky
+light (the roof, sails and stands block most of the sky and the low sun), and open and roofed treads barely differ.
+So the seats' ambient + sun is scaled by one per-state factor inside the shell plan. Night stays 1, because FLOOD
+was calibrated against the full ambient. `CAM_Seat_212`: day mean **100.3** (Cycles 105.6, v1 155.4), golden 120.3
+(140.4), night 137.2 (171.9). The seats now sit at the treads' brightness. Tier hues are the aramcostadium.com
+swatches (Lower green, Club sand, Upper blue) at the Cycles seat luminance, so they are more saturated than
+Cycles' teal green by design.

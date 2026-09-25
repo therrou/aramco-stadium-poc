@@ -3,10 +3,9 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { toThree, type V3 } from "./coords";
 import type { Section } from "./loader";
 import type { SeatTable } from "./seatsData";
-import type { Avail } from "./availability";
 import { patchOutdoorLight, type OutdoorUniforms } from "./treeLight";
+import { tierAlbedo, type Tier } from "./tiers";
 
-export const SEAT_COLORS = { available: 0x2fbf71, taken: 0x6b6f76, club: 0xefe3c8 } as const;
 export const SEAT_LOD_DIST = 80;   // m from camera to section centroid; the worst case is pinned in flyto.test.ts (Task 7). Lowered from 90 -> 80 (worst-case 30,379 -> 20,098 seats) to satisfy decision D6 (<=25k).
 const CLUB_WIDTH = 0.58 / 0.5;     // params.CLUB.seat_w / LOWER.seat_w
 
@@ -17,11 +16,6 @@ export function seatGeometry() {
   const g = mergeGeometries([pan.toNonIndexed(), back.toNonIndexed()])!;
   g.computeVertexNormals();
   return g;
-}
-
-export function seatColor(tier: string, avail: Avail) {
-  if (avail === 1) return SEAT_COLORS.taken;
-  return tier === "Club" ? SEAT_COLORS.club : SEAT_COLORS.available;
 }
 
 /** Sections whose centroid is within `dist` of the camera (Blender coords). `always` stays visible. */
@@ -39,8 +33,8 @@ export class SeatField {
   private matrices: Float32Array;
   private colors: Float32Array;
   private visible: Set<number> | null = null;   // null: nothing applied yet (the first call must not early-out)
-  private tierOf = new Map<number, string>();
-  constructor(private t: SeatTable, private idx: Map<number, { start: number; end: number }>, sections: Section[], public avail: Uint8Array, outdoor?: OutdoorUniforms) {
+  private tierOf = new Map<number, Tier>();
+  constructor(private t: SeatTable, private idx: Map<number, { start: number; end: number }>, sections: Section[], outdoor?: OutdoorUniforms) {
     for (const s of sections) this.tierOf.set(Number(s.id), s.tier);
     const mat = new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0 });
     if (outdoor) patchOutdoorLight(mat, outdoor, "seats-outdoor");   // R11: no scene lights with lightmaps
@@ -54,7 +48,7 @@ export class SeatField {
       const w = this.tierOf.get(t.section[i]) === "Club" ? CLUB_WIDTH : 1;
       m.compose(p, q, new THREE.Vector3(1, 1, w));
       m.toArray(this.matrices, i * 16);
-      this.mesh.setColorAt(i, c.setHex(seatColor(this.tierOf.get(t.section[i])!, avail[i] as Avail)));
+      this.mesh.setColorAt(i, tierAlbedo(this.tierOf.get(t.section[i]) ?? "Lower", c));   // A6 (v2)
     }
     this.colors = (this.mesh.instanceColor!.array as Float32Array).slice();
     this.setVisibleSections(new Set());

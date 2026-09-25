@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { toThree, type V3 } from "./coords";
 import type { SeatTable } from "./seatsData";
-import type { Avail } from "./availability";
+import { tierAlbedo, type Tier } from "./tiers";
 import { patchOutdoorLight, type OutdoorUniforms } from "./treeLight";
 
 /** Per row: first and last seat of the row, lifted 0.5 m (Blender coords). */
@@ -16,12 +16,6 @@ export function stripVertices(t: SeatTable, idx: Map<number, { start: number; en
   return out;
 }
 
-const GREEN = new THREE.Color(0x2fbf71), GREY = new THREE.Color(0x6b6f76), CREAM = new THREE.Color(0xefe3c8);
-/** Final review 10: patch colour like the legend: club cream, else green; mixed toward taken grey by the taken ratio. */
-export function patchColor(tier: string | undefined, takenRatio: number, out = new THREE.Color()) {
-  return out.copy(tier === "Club" ? CREAM : GREEN).lerp(GREY, takenRatio);
-}
-
 /** One mesh for all section patches: drawn when seats are hidden, and always used for picking. */
 export class SectionPatches {
   mesh: THREE.Mesh;
@@ -29,15 +23,13 @@ export class SectionPatches {
   private hidden: THREE.DataTexture;
   private slot = new Map<number, number>();
   private hiddenIds = new Set<number>();
-  constructor(t: SeatTable, idx: Map<number, { start: number; end: number }>, avail: Uint8Array, outdoor?: OutdoorUniforms,
-              tierOf: (id: number) => string | undefined = () => undefined) {
+  constructor(t: SeatTable, idx: Map<number, { start: number; end: number }>, outdoor?: OutdoorUniforms,
+              tierOf: (id: number) => Tier | undefined = () => undefined) {
     const pos: number[] = [], col: number[] = [], sec: number[] = [];
     const c = new THREE.Color();
     [...idx.keys()].forEach((id, k) => {
       this.slot.set(id, k);
-      const { start, end } = idx.get(id)!;
-      let taken = 0; for (let i = start; i < end; i++) taken += avail[i] as Avail;
-      patchColor(tierOf(id), taken / (end - start), c);
+      tierAlbedo(tierOf(id) ?? "Lower", c);   // A6 (v2): tier colour at the Cycles seat brightness
       const v = stripVertices(t, idx, id).map((p) => toThree(p));
       for (let r = 0; r + 3 < v.length; r += 2) {
         for (const q of [v[r], v[r + 1], v[r + 2], v[r + 1], v[r + 3], v[r + 2]]) { pos.push(q.x, q.y, q.z); col.push(c.r, c.g, c.b); sec.push(k); }

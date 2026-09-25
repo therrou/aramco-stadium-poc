@@ -202,3 +202,18 @@ Remaining gaps:
   so a full shadow is about a third darker.
 - Casters are the stadium (except glass, the net, and ground planes), the seats and the tree meshes. The site's
   plaza/lawn plane runs under the bowl and had hidden the pitch from the sun until it stopped casting.
+
+## v3 option 2: plaza reflection
+
+- The scene is rendered a second time from the camera mirrored about the ground (half resolution, mip-mapped,
+  with a global clip plane at the ground), only when the eye is outside the bowl and below 80 m.
+- The paving and plaza materials use that image in place of their sky reflection, so their own roughness and
+  Fresnel still apply. The blur is the mip level for the roughness (floored at 0.5, since the tiles are glossy,
+  not polished), plus a vertical smear along the view.
+- Strength is 0.3 by day and 0.7 at night. Cycles' day plaza shows only a sheen; at night the lit facade reads
+  clearly.
+- three's `Reflector` was not usable: its oblique-near-plane projection breaks with the reversed depth buffer and
+  clipped the stadium away. The mirror camera is built directly instead.
+- `CAM_Approach`: day 0.97, golden 0.95, night **0.82** (was 0.62).
+- Cost: +2.4 ms per frame at a 3840×2160 buffer (22.9 against 20.5 ms). Nothing is added in views where the
+  reflection is off.

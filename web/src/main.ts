@@ -18,6 +18,7 @@ import { STATES, type State } from "./loader";
 import { GROUND_RE, setupStadiumMaterials, specOccK, type SharedUniforms } from "./stadium";
 import { Lighting, makeComposer } from "./lighting";
 import { SunShadow } from "./sunShadow";
+import { PlazaReflection } from "./planarReflect";
 import { missingLightmaps } from "./lightingState";
 import { setupTrees } from "./trees";
 import { heroesIn } from "./heroViews";
@@ -99,6 +100,9 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   shared.uSunDirView = lighting.outdoor.uSunDirView;
   shared.uAmbient = lighting.outdoor.uAmbient;
   const sun = useLightmaps ? new SunShadow(renderer, scene) : null;
+  // v3 option 2: the plaza mirrors the scene (the lit facade at night), when seen close from outside
+  const mirror = useLightmaps ? new PlazaReflection() : null;
+  if (mirror) Object.assign(shared, mirror.uniforms);
   a.stadium.scene.traverse((o) => {
     const m = o as THREE.Mesh;
     if (!m.isMesh) return;
@@ -239,6 +243,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     highlight.update(now / 1000);
     lighting.update(dt, rig.exposure, camera);
     sun?.update(lighting.t.night);
+    mirror?.update(renderer, scene, camera, toBlender(camera.position));
     composer.render(dt);
   };
 

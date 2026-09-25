@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { MAX_CHARTS, chartUniforms, chartsOfMesh, pitchLinesGlsl, type Chart } from "./pitchLines";
 import { STATE_NIGHT } from "./lightingState";
 import { SUN_VIS_GLSL } from "./sunShadow";
+import { PLANAR_GLSL, isPlanarMaterial } from "./planarReflect";
 import { BICUBIC_GLSL, CONCRETE_GLSL, GRASS_GLSL, GROUND_GLSL, GROUND_MAP_GLSL, NET, NET_GLSL, detailFor } from "./detail";
 
 const LM_RE = /vec4 lightMapTexel = texture2D\( lightMap, vLightMapUv \);\s*vec3 lightMapIrradiance = lightMapTexel\.rgb \* lightMapIntensity;/;
@@ -76,7 +77,10 @@ export function patchLightsChunk(chunk: string) {
 	#else
 		float lmSo = 1.0;
 	#endif
-	vec3 iblRadiance = mix( getIBLRadiance( geometryViewDir, geometryNormal, material.roughness ), getIBLRadianceB( geometryViewDir, geometryNormal, material.roughness ), uEnvBlend ) * lmSo;`)
+	vec3 iblRadiance = mix( getIBLRadiance( geometryViewDir, geometryNormal, material.roughness ), getIBLRadianceB( geometryViewDir, geometryNormal, material.roughness ), uEnvBlend ) * lmSo;
+#ifdef PLANAR_REFLECT
+	iblRadiance = mix( iblRadiance, planarReflection( material.roughness ), uReflectOn );
+#endif`)
     .replace(COAT_RAD_RE, `clearcoatRadiance += mix( getIBLRadiance( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), getIBLRadianceB( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), uEnvBlend ) * lmSo;`);
 }
 
@@ -87,6 +91,7 @@ varying vec3 vWorldPosB;
 vec3 rgbmDecode( vec4 c ) { return c.rgb * c.a * uRgbmRange; }
 uniform vec3 uSun; uniform vec3 uSunDirView; uniform vec3 uAmbient;   // S1: the sun and sky as in treeLight
 ${BICUBIC_GLSL}
+${PLANAR_GLSL}
 ${SAIL_NIGHT_GLSL}
 uniform float uSoK;
 float lmSpecOcc( vec3 e ) { return clamp( dot( e, vec3( 0.2126, 0.7152, 0.0722 ) ) / uSoK, SO_MIN, 1.0 ); }
@@ -142,6 +147,8 @@ float sailLeds( vec3 pB ) {
 export interface SharedUniforms {
   /** S1: the sun (irradiance and view-space direction), shared with the outdoor model; set by main.ts. */
   uSun?: { value: THREE.Color }; uSunDirView?: { value: THREE.Vector3 }; uAmbient?: { value: THREE.Color };
+  /** v3 option 2: the plaza's mirror image (planarReflect.ts); set by main.ts. */
+  tReflect?: { value: THREE.Texture }; uReflectMatrix?: { value: THREE.Matrix4 }; uReflectOn?: { value: number };
   uLmBlend: { value: number }; uEnvB: { value: THREE.Texture | null }; uEnvBlend: { value: number }; uRgbmRange: { value: number }; uNight: { value: number }; uSoK: { value: number } }
 /** Full uniform set seen by a stadium material: the shared ones plus its own second lightmap. */
 export interface LightingUniforms extends SharedUniforms { uLmB: { value: THREE.Texture | null } }
@@ -283,6 +290,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
     const lines = useLightmaps && lineCharts !== null && group === "pitch" && PITCH_LINES_RE.test(mat.name);
     const ex = mat.userData as { emDay?: number; emNight?: number; special?: string; tint?: number[] };
     const detail = detailFor(mat.name);
+    const planar = useLightmaps && isPlanarMaterial(mat.name);
     for (const t of [mat.map, mat.normalMap, mat.roughnessMap, mat.metalnessMap, mat.emissiveMap]) if (t) t.anisotropy = Math.min(MAX_ANISO, maxAniso);
     if (detail === "grass") mat.map = null;           // D1: the shader draws the grass; the 1024 px bake is not needed
     if (detail === "net") { mat.transparent = true; mat.depthWrite = false; mat.side = THREE.DoubleSide; mat.alphaTest = 0; }
@@ -309,7 +317,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
         .replace("#include <worldpos_vertex>", "#include <worldpos_vertex>\nvec4 wpB = modelMatrix * vec4( transformed, 1.0 ); vWorldPosB = vec3( wpB.x, -wpB.z, wpB.y );");
       s.fragmentShader = s.fragmentShader
         .replace("#include <shadowmap_pars_fragment>", "#include <shadowmap_pars_fragment>\n" + SUN_VIS_GLSL)
-        .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + soMinDefine(ex.special) + PARS + (ex.special === "sailLeds" ? LED_GLSL : "")
+        .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + soMinDefine(ex.special) + (planar ? "#define PLANAR_REFLECT\n" : "") + PARS + (ex.special === "sailLeds" ? LED_GLSL : "")
           + (lines ? pitchLinesGlsl(lineCharts!.length) : ""))
         .replace("#include <lights_fragment_maps>", lightsChunkFor(chunk, useLightmaps, lines, detail));
       if (detail) s.fragmentShader = s.fragmentShader
@@ -319,7 +327,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
         s.fragmentShader = s.fragmentShader.replace("#include <emissivemap_fragment>",
           "#include <emissivemap_fragment>\ntotalEmissiveRadiance = min( totalEmissiveRadiance * sailLeds( vWorldPosB ), vec3( " + LED_MAX.toFixed(2) + " ) );");
     };
-    mat.customProgramCacheKey = () => `stadium-${useLightmaps}-${ex.special ?? ""}${lines ? `-lines${lineCharts!.length}` : ""}-${detail ?? ""}`;
+    mat.customProgramCacheKey = () => `stadium-${useLightmaps}-${ex.special ?? ""}${lines ? `-lines${lineCharts!.length}` : ""}-${detail ?? ""}${planar ? "-planar" : ""}`;
     mat.needsUpdate = true;
   });
   return byGroup;

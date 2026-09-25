@@ -78,7 +78,7 @@ def stage_geometry(report, quality):
     tris = webscene.triangles(objs)
     path = os.path.join(RAW, "stadium.glb")
     gltfout.export_glb(objs, path)
-    report.update(objects=len(objs), static_triangles=tris,
+    report.update(objects=len(objs), static_triangles=tris, ground=dict(webscene.STATS),
                   stadium_glb_mb=round(os.path.getsize(path) / 2**20, 2))
     fails = budget.check({"triangles": tris + budget.TREE_TRI_BUDGET + budget.SEAT_TRI_BUDGET})
     report["budget_failures"] = fails

@@ -15,3 +15,11 @@ def test_exclusions():
         assert groups.is_excluded(n)
     for n in ("Podium_Deck", "Cars", "Sign_AramcoStadium", "Bridge_NE_Glass"):
         assert not groups.is_excluded(n)
+
+
+def test_site_near_split():
+    out = groups.site_split("site", "M_Lawn", [True, True, False], [120.0, 450.0, 50.0])
+    assert list(out) == ["site_near", "site", "site"]
+    assert list(groups.site_split("bowl", "M_Concrete", [True], [10.0])) == ["bowl"]
+    assert list(groups.site_split("site", "M_Car3", [True], [10.0])) == ["site"]
+    assert "site_near" in groups.TEXELS_PER_M and "site_near" in groups.ALBEDO_TEXELS_PER_M

@@ -20,6 +20,9 @@ def _area(objs):
 
 # UV charts and packing live in uvpack.py (pure numpy, host-tested); see its docstring.
 CELL_M = {"site": 64.0}          # grid cell per group (default 16 m)
+# Task 13b: flat faces of the ground groups get planar top-down charts on this (coarser) grid; webscene
+# cut their faces on the same grid, so a road, lawn or plaza is one chart per cell, not one per face
+FLAT_CELL = {"site": groups.FLAT_CELL_M, "site_near": groups.FLAT_CELL_M, "pitch": groups.FLAT_CELL_M}
 OVERLAP_TOLERANCE = 0.001        # max fraction of covered texels written twice (float32 edge rounding)
 
 
@@ -67,10 +70,10 @@ def _loop_triangles(objs):
     return np.concatenate(tris), np.concatenate(faces)
 
 
-def _chart_uvs(objs, size, texels_per_m, cell, layer="LightmapUV"):
+def _chart_uvs(objs, size, texels_per_m, cell, layer="LightmapUV", flat_cell=None):
     n, area, cen, tot, co = _group_mesh(objs)
     tris = _loop_triangles(objs)
-    uv, stats = uvpack.chart_uvs(n, area, cen, tot, co, size, texels_per_m, cell, tris=tris)
+    uv, stats = uvpack.chart_uvs(n, area, cen, tot, co, size, texels_per_m, cell, tris=tris, flat_cell=flat_cell)
     off = 0
     for o in objs:
         L = len(o.data.loops)
@@ -159,7 +162,7 @@ def lightmap_uvs(objs_by_group, scale=1.0):
         kw = {"hi": ATLAS_HI[g]} if g in ATLAS_HI else {}
         tpm = groups.TEXELS_PER_M[g] * scale
         size = texel.atlas_size(_area(objs), tpm, **kw)
-        st = CHART_STATS[g] = _chart_uvs(objs, size, tpm, CELL_M.get(g, 16.0))
+        st = CHART_STATS[g] = _chart_uvs(objs, size, tpm, CELL_M.get(g, 16.0), flat_cell=FLAT_CELL.get(g))
         print(f"lightmap_uvs {g}: {size}px, {st['charts']} charts, overlap texels "
               f"{st['stored_overlap_texels']}/{st['covered_texels']} (rounds {st['overlap_rounds']})")
         if st["stored_overlap_texels"] > OVERLAP_TOLERANCE * st["covered_texels"]:
@@ -202,6 +205,22 @@ def _bake_material(src_mat, n):
     return m
 
 
+DILATE_PX = 8                   # >= the 4-px chart gutter (uvpack.MARGIN_PX), like the old EXTEND margin
+
+
+def _coverage(objs, size):
+    """Texels the bake wrote: centres inside a LightmapUV triangle of any object of the group."""
+    uv, tris, base = [], [], 0
+    for o in objs:
+        d = o.data.uv_layers["LightmapUV"].data
+        a = np.empty(len(d) * 2, np.float32)
+        d.foreach_get("uv", a)
+        uv.append(a.reshape(-1, 2))
+        tris.append(_loop_triangles([o])[0] + base)
+        base += len(d)
+    return uvpack.coverage(np.concatenate(uv).astype(np.float64), np.concatenate(tris), size)
+
+
 def bake_lightmap(group, objs, size, state, n, samples):
     webscene.set_state(n)
     img = bpy.data.images.get(f"_lm_{group}") or bpy.data.images.new(f"_lm_{group}", size, size, float_buffer=True, alpha=False)
@@ -231,8 +250,8 @@ def bake_lightmap(group, objs, size, state, n, samples):
         try:
             sc = bpy.context.scene
             sc.cycles.samples = samples
-            sc.render.bake.margin = 8                                      # fills empty texels only
-            sc.render.bake.margin_type = "EXTEND"
+            sc.render.bake.margin = 0             # Blender's margin is per object: it overwrote the
+            # texels of objects baked earlier into the same atlas; the atlas is dilated below instead
             for o in sc.objects:
                 o.select_set(False)
             for o in objs:
@@ -250,7 +269,7 @@ def bake_lightmap(group, objs, size, state, n, samples):
                 bpy.data.materials.remove(tmp)
     buf = np.empty(size * size * 4, np.float32)
     img.pixels.foreach_get(buf)
-    rgb = buf.reshape(size, size, 4)[..., :3]
+    rgb, _ = uvpack.dilate(buf.reshape(size, size, 4)[..., :3], _coverage(objs, size), DILATE_PX)
     lit = rgb.max(-1) > 1e-4
     CLIP.setdefault(state, {})[group] = round(float((rgb.max(-1) > rgbm.RANGE)[lit].mean()) * 100, 2) if lit.any() else 0.0
     enc = rgbm.encode(rgb)

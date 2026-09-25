@@ -65,11 +65,31 @@ def face_pairs(co, tot):
     return pair[:, 0], pair[:, 1], fol
 
 
-def charts(n, area, cen, tot, co, cell, min_area=0.0):
-    """Chart id per face (height-field pieces per grid cell) and the face of every loop."""
+FLAT_NZ = 0.9            # faces with normal.z above this are "flat" (planar top-down charts)
+GROUND_Z = 0.3           # ground layers (sand -0.05 .. glow strips 0.035): nothing but the ground is below them
+
+
+def ground_down(n, cen, zmax=GROUND_Z, nz=-FLAT_NZ):
+    """Faces of a ground layer whose normal points down into the ground (Task 13b).
+
+    Site roads/parking (M_Asphalt: 371k of 450k m2), road lines, pitch surround and part of the paving
+    were modelled face-down. A diffuse bake shades the side the normal points to, so these baked the
+    unlit gap above the sand (dark triangles), and their mixed up/down neighbours broke into per-face
+    charts. Near the ground nothing legitimately faces down, so these are flipped before charting."""
+    return (n[:, 2] < nz) & (cen[:, 2] < zmax)
+
+
+def charts(n, area, cen, tot, co, cell, min_area=0.0, flat_cell=None):
+    """Chart id per face (height-field pieces per grid cell) and the face of every loop.
+
+    flat_cell: grid cell (m) for flat faces (normal.z > FLAT_NZ), which are cut apart from the rest.
+    Large flat charts are planar top-down projections: no seams inside a road, lawn or plaza."""
     F = len(n)
     a, b, fol = face_pairs(co, tot)
-    cell_id = np.unique(np.floor(cen[:, :2] / cell), axis=0, return_inverse=True)[1].ravel()
+    flat = n[:, 2] > FLAT_NZ if flat_cell else np.zeros(F, bool)
+    size = np.where(flat, flat_cell or cell, cell)[:, None]
+    key = np.concatenate([np.floor(cen[:, :2] / size), flat[:, None]], 1)
+    cell_id = np.unique(key, axis=0, return_inverse=True)[1].ravel()
     cls = cell_id * 2 + (n[:, 2] < -0.05)
     chart = np.full(F, -1)
     todo = np.ones(F, bool)
@@ -242,14 +262,14 @@ def _split_by_depth(chart, bad, cen, N):
 
 
 def chart_uvs(n, area, cen, tot, co, size, texels_per_m, cell, margin=MARGIN_PX,
-              small=SMALL_TEXELS, rounds=24, tris=None, check=3):
+              small=SMALL_TEXELS, rounds=24, tris=None, check=3, flat_cell=None):
     """Loop UVs (L,2) in [0, 1] for one shared atlas, with no chart self-overlap; and stats.
 
     tris: (loop triangles (T,3), face of each triangle); defaults to a fan (convex faces only;
     pass the real triangulation for concave n-gons). Each layout is checked on a grid `check` times
     finer than the atlas: the atlas' texel centres are a subset of that grid (check odd), so a
     clean check means a clean atlas, and slivers are caught before a repack moves the grid."""
-    chart, fol = charts(n, area, cen, tot, co, cell, small / texels_per_m ** 2)
+    chart, fol = charts(n, area, cen, tot, co, cell, small / texels_per_m ** 2, flat_cell)
     tri, tface = tris if tris is not None else fan(tot)
     history = []
     for r in range(rounds + 2):
@@ -269,3 +289,39 @@ def chart_uvs(n, area, cen, tot, co, size, texels_per_m, cell, margin=MARGIN_PX,
     over, covered, _ = overlap(uv, tri, size)
     stats.update(overlap_texels=over, covered_texels=covered, overlap_rounds=history)
     return uv, stats
+
+
+def coverage(uv, tri, size):
+    """Bool (size, size) mask of texels whose centre lies inside a UV triangle (row = v, column = u)."""
+    tex, _ = rasterize(uv, tri, size)
+    m = np.zeros(size * size, bool)
+    m[tex] = True
+    return m.reshape(size, size)
+
+
+def dilate(img, mask, steps):
+    """Fill empty texels from their filled 8-neighbours (mean), `steps` rings out; returns (img, mask).
+
+    Task 13b: Blender applies the bake margin per object, so when several objects share one atlas a
+    later object's EXTEND margin overwrote an earlier object's texels within the margin (the dark
+    staircase "chips" on the sails: 60 % of skin texels within 8 px of a SailUnder chart were dark,
+    4.5 % elsewhere). The bake now runs with margin 0 and the whole atlas is dilated once here."""
+    img = np.array(img, np.float32, copy=True)
+    m = np.array(mask, bool, copy=True)
+    H, W = m.shape
+    for _ in range(steps):
+        pi = np.pad(img * m[..., None], ((1, 1), (1, 1), (0, 0)))
+        pm = np.pad(m, 1).astype(np.float32)
+        acc = np.zeros_like(img)
+        cnt = np.zeros((H, W), np.float32)
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dy or dx:
+                    acc += pi[1 + dy:1 + dy + H, 1 + dx:1 + dx + W]
+                    cnt += pm[1 + dy:1 + dy + H, 1 + dx:1 + dx + W]
+        new = ~m & (cnt > 0)
+        if not new.any():
+            break
+        img[new] = acc[new] / cnt[new][:, None]
+        m |= new
+    return img, m

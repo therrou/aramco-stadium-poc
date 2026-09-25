@@ -50,6 +50,8 @@ def web_material(info, baked):
         mat.surface_render_method = "BLENDED"
     em = info["emission"]
     mat["emDay"], mat["emNight"], mat["special"] = 0.0, 0.0, info["special"] or ""
+    if info.get("tint"):
+        mat["tint"] = list(info["tint"])     # web: color = tint (may exceed glTF's 0..1 baseColorFactor)
     if em:
         b.inputs["Emission Color"].default_value = (*em["color"], 1.0)
         b.inputs["Emission Strength"].default_value = 1.0

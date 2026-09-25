@@ -151,3 +151,65 @@ def test_fan_triangulates_mixed_polygons():
     tri, face = uvpack.fan(np.array([3, 4, 5]))
     assert tri.tolist() == [[0, 1, 2], [3, 4, 5], [3, 5, 6], [7, 8, 9], [7, 9, 10], [7, 10, 11]]
     assert face.tolist() == [0, 1, 1, 2, 2, 2]
+
+
+def test_ground_down_only_flips_low_downward_faces():
+    n = np.array([[0, 0, -1.0], [0, 0, -1.0], [0, 0, 1.0], [1.0, 0, 0]])
+    cen = np.array([[0, 0, 0.02], [0, 0, 8.9], [0, 0, 0.0], [0, 0, 0.1]])
+    assert list(uvpack.ground_down(n, cen)) == [True, False, False, False]    # a deck underside at 8.9 m stays
+
+
+def grid_plane(nx, ny, step=4.0, z=0.0):
+    v = [(i * step, j * step, z) for j in range(ny + 1) for i in range(nx + 1)]
+    f = [(j * (nx + 1) + i, j * (nx + 1) + i + 1, (j + 1) * (nx + 1) + i + 1, (j + 1) * (nx + 1) + i)
+         for j in range(ny) for i in range(nx)]
+    return mesh(v, f)
+
+
+def test_flat_cell_makes_one_planar_chart_per_cell():
+    n, area, cen, tot, co = grid_plane(32, 8)                          # 128 x 32 m of flat faces
+    per_cell, _ = uvpack.charts(n, area, cen, tot, co, cell=16.0)
+    flat, _ = uvpack.charts(n, area, cen, tot, co, cell=16.0, flat_cell=64.0)
+    assert per_cell.max() + 1 == 8 * 2                                 # 16 m cells
+    assert flat.max() + 1 == 2                                         # two 64 m cells
+    uv, st = uvpack.chart_uvs(n, area, cen, tot, co, 256, 1.0, 16.0, flat_cell=64.0)
+    assert st["overlap_texels"] == 0 and st["charts"] == 2
+    assert uv.min() >= 0.0 and uv.max() <= 1.0
+    # planar: every chart is an isometric top-down map (uniform scale, no distortion)
+    fol = np.repeat(np.arange(len(tot)), tot)
+    for c in range(2):
+        loops = np.nonzero(flat[fol] == c)[0]
+        d_uv = np.linalg.norm(uv[loops] - uv[loops[0]], axis=1)
+        d_xy = np.linalg.norm(co[loops, :2] - co[loops[0], :2], axis=1)
+        k = d_uv[d_xy > 0] / d_xy[d_xy > 0]
+        assert np.allclose(k, k[0], rtol=1e-6)
+
+
+def test_flat_and_sloped_faces_never_share_a_chart():
+    a = grid_plane(4, 4)
+    n, area, cen, tot, co = a
+    tilt = np.array([[1, 0, 0], [0, 0.6, -0.8], [0, 0.8, 0.6]])        # 53 degree slope, same cell
+    b = mesh(np.array([[x, y, z] for x, y, z in co.reshape(-1, 3)[:4]]) @ tilt.T + [0, 0, 5], [(0, 1, 2, 3)])
+    n, area, cen, tot, co = join(a, b)
+    ch, _ = uvpack.charts(n, area, cen, tot, co, cell=64.0, flat_cell=64.0)
+    assert ch[-1] not in set(ch[:-1])
+
+
+def test_coverage_matches_rasterize():
+    uv = np.array([[0.1, 0.1], [0.9, 0.1], [0.1, 0.9]])
+    m = uvpack.coverage(uv, np.array([[0, 1, 2]]), 16)
+    assert m.shape == (16, 16) and m[2, 2] and not m[15, 15]
+    assert m.sum() == len(uvpack.rasterize(uv, np.array([[0, 1, 2]]), 16)[0])
+
+
+def test_dilate_fills_gutters_from_own_neighbours_only():
+    img = np.zeros((8, 8, 3), np.float32)
+    mask = np.zeros((8, 8), bool)
+    img[:, :3] = 1.0; mask[:, :3] = True                               # chart A (bright), columns 0-2
+    img[:, 6:] = 0.1; mask[:, 6:] = True                               # chart B (dark), columns 6-7
+    out, m = uvpack.dilate(img, mask, 1)
+    assert m[:, 3].all() and m[:, 5].all() and not m[:, 4].any()
+    assert np.allclose(out[:, 3], 1.0) and np.allclose(out[:, 5], 0.1)  # each side extends its own chart
+    assert np.allclose(out[:, :3], 1.0) and np.allclose(out[:, 6:], 0.1)  # covered texels never change
+    out2, m2 = uvpack.dilate(img, mask, 8)
+    assert m2.all()

@@ -45,11 +45,60 @@ def _night_emission(b):
     return (round(day, 6), round(day + mul.inputs[1].default_value, 6))
 
 
+def _scalar(sock, depth=4):
+    """Constant value of a float socket through MULTIPLY/ADD math; a Map Range gives its mid-range
+    (its input here is a 0..1 noise with mean ~0.5). None if not reducible."""
+    if not sock.links:
+        v = sock.default_value
+        return float(v) if isinstance(v, float) else None
+    n = sock.links[0].from_node
+    if depth == 0:
+        return None
+    if n.type == "MAP_RANGE":
+        return 0.5 * (n.inputs["To Min"].default_value + n.inputs["To Max"].default_value)
+    if n.type == "MATH" and n.operation in {"MULTIPLY", "ADD"}:
+        a, b = _scalar(n.inputs[0], depth - 1), _scalar(n.inputs[1], depth - 1)
+        if a is None or b is None:
+            return None
+        return a * b if n.operation == "MULTIPLY" else a + b
+    return None
+
+
+def _tint(bc):
+    """Mean colour multiplier on an image base colour: Mix(MULTIPLY, image, CombineColor(...)) (Task 13b:
+    the Poly Haven site materials tint the image, e.g. lawn x (0.71, 0.89, 0.67); the export dropped it)."""
+    if not bc.links:
+        return None
+    mix = bc.links[0].from_node
+    if mix.type != "MIX" or getattr(mix, "blend_type", "") != "MULTIPLY":
+        return None
+    ins = [i for i in mix.inputs if i.enabled and i.type == "RGBA"]
+    for side in ins:
+        if side.links and side.links[0].from_node.type == "COMBINE_COLOR":
+            cc = side.links[0].from_node
+            t = [_scalar(i) for i in cc.inputs[:3]]
+            if None not in t:
+                return tuple(round(x, 4) for x in t)
+    return None
+
+
+def _image_mean(img, srgb):
+    """Mean linear value of an image (byte pixels are stored encoded: decoded here when sRGB)."""
+    import numpy as np
+    w, h = img.size
+    a = np.empty(w * h * 4, np.float32)
+    img.pixels.foreach_get(a)
+    rgb = a.reshape(-1, 4)[::7, :3].astype(np.float64)
+    if srgb and not img.is_float:
+        rgb = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    return rgb.mean(0)
+
+
 def classify(mat):
     b = _bsdf(mat)
     info = {"name": mat.name, "kind": "constant", "base": tuple(mat.diffuse_color[:3]),
             "rough": 0.5, "metal": 0.0, "alpha": 1.0, "tile": None, "images": {},
-            "emission": None, "special": None}
+            "emission": None, "special": None, "tint": None}
     if b is None:
         return info
     bc = b.inputs["Base Color"]
@@ -71,6 +120,13 @@ def classify(mat):
             info["images"]["base"] = img.image.name
             if mp is not None:
                 info["tile"] = 1.0 / mp.inputs["Scale"].default_value[0]
+            info["tint"] = _tint(bc)
+            mean = _image_mean(img.image, img.image.colorspace_settings.name != "Non-Color")
+            # bake stand-in albedo: the textured material's mean colour, not the viewport colour
+            info["base"] = tuple(round(float(m * t), 4) for m, t in zip(mean, info["tint"] or (1, 1, 1)))
+            ri = _upstream(b.inputs["Roughness"], {"TEX_IMAGE"}, depth=2)
+            if ri is not None and ri.image is not None:
+                info["rough"] = round(float(_image_mean(ri.image, False).mean()), 3)   # was a flat 0.5
             nm = next((n for n in mat.node_tree.nodes if n.type == "NORMAL_MAP"), None)
             if nm is not None:
                 ni = _upstream(nm.inputs["Color"], {"TEX_IMAGE"})

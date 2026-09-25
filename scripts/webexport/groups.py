@@ -1,6 +1,9 @@
 """Which lightmap atlas a merged object belongs to, and what is not exported as geometry."""
 GROUP_OF_COLLECTION = {"Pitch": "pitch", "Bowl": "bowl", "Shell": "structure", "Site": "site"}
 SAIL_MATERIALS = {"M_SailSkin", "M_SailUnder"}
+# materials whose image content is UV-mapped in the source (LED screens, tier ribbons): the web
+# scene keeps their "UVMap" as TEXCOORD_0 and exports the image as emissiveTexture
+KEEP_UV_MATERIALS = {"M_Screen", "M_FasciaLED"}
 EXCLUDE_PREFIXES = ("Seats_", "SeatModel", "Trees_", "Crowd_", "Haze_", "Sign_Path")
 # lightmap texels per metre (spec: ~4 on the stadium, ~1 on the site)
 TEXELS_PER_M = {"pitch": 4.0, "bowl": 4.0, "sails": 4.0, "structure": 4.0, "site": 0.6,   # site 0.6: size-budget knob (Task 10)

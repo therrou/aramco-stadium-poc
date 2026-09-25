@@ -13,6 +13,7 @@ import math
 from . import bowl
 from . import common as C
 from . import params as P
+from . import signage
 
 _CM = -abs(math.cos(P.SHELL_THETA_MAX)) ** 0.62
 ZB = (P.PODIUM_Z - P.SHELL_Z_TOP * _CM) / (1 - _CM)
@@ -49,11 +50,12 @@ def normal(phi, theta, h=1e-4):
 
 
 SAIL_ARCH = 0.22   # fraction of theta the leading edge is trimmed at the base
-SAIL_PILLOW = 3.0  # extra cross-width bulge (m) toward the base: puffy lobes
+SAIL_GAP_MIN = 1.8  # lifted-edge step at the oculus: the lit seam reads all the way up
+SAIL_PILLOW = 4.5  # extra cross-width bulge (m) toward the base: puffy lobes
 
 
 def twist(theta):
-    return P.SAIL_TWIST * (theta / P.SHELL_THETA_MAX) ** 0.9
+    return P.SAIL_TWIST * (theta / P.SHELL_THETA_MAX) ** P.SAIL_TWIST_EXP
 
 
 def roof_z_at(x, y):
@@ -141,15 +143,15 @@ def _add_translucency(mat, fac, color):
 
 def _under_material():
     """Cream underside of each sail; glows warm at night, stronger near the base."""
-    mat = C.principled("M_SailUnder", (0.93, 0.87, 0.76), rough=0.55)
+    mat = C.principled("M_SailUnder", (0.7, 0.8, 0.78), rough=0.55)
     nt, b = mat.node_tree, C.bsdf_of(mat)
-    b.inputs["Emission Color"].default_value = (1.0, 0.78, 0.52, 1)
+    b.inputs["Emission Color"].default_value = (0.3, 0.95, 0.75, 1)   # teal-mint glow (key visuals)
     geo = nt.nodes.new("ShaderNodeNewGeometry")
     sep = nt.nodes.new("ShaderNodeSeparateXYZ")
     nt.links.new(geo.outputs["Position"], sep.inputs[0])
     h = C.math_node(nt, "DIVIDE", C.math_node(nt, "SUBTRACT", sep.outputs["Z"], P.PODIUM_Z), 36.0, clamp=True)
     glow = C.math_node(nt, "POWER", C.math_node(nt, "SUBTRACT", 1.0, h, clamp=True), 1.6)
-    glow = C.math_node(nt, "ADD", C.math_node(nt, "MULTIPLY", glow, 4.5), 0.8)
+    glow = C.math_node(nt, "ADD", C.math_node(nt, "MULTIPLY", glow, 3.5), 1.0)   # whole underside lit teal
     s = C.math_node(nt, "MULTIPLY", glow, C.night_node(nt))
     nt.links.new(s, b.inputs["Emission Strength"])
     _add_translucency(mat, 0.6, (0.95, 0.9, 0.8))
@@ -174,14 +176,15 @@ def _sails(coll, skin, under):
             row = []
             for i in range(ns + 1):
                 s = i / ns
-                # leading side stops higher -> arched opening under the lifted edge
-                th = P.SHELL_THETA_MAX * v * (1 - SAIL_ARCH * s ** 2)
+                # lifted side stops higher -> arched opening under the lifted edge
+                e = 1 - s if P.SAIL_LIFT_TRAILING else s
+                th = P.SHELL_THETA_MAX * v * (1 - SAIL_ARCH * e ** 2)
                 phi = phi0 + twist(th) + s * width
                 px, py, pz = surface(phi, th)
                 nx, ny, nz = normal(phi, th)
                 tv = th / P.SHELL_THETA_MAX
-                g = 0.4 + (P.SAIL_GAP_MAX - 0.4) * math.sin(math.pi * min(tv / 0.8, 1.0) / 2) ** 2
-                lift = g * s ** 1.35 + (1.0 + SAIL_PILLOW * tv ** 0.6) * math.sin(math.pi * s) ** 0.8
+                g = SAIL_GAP_MIN + (P.SAIL_GAP_MAX - SAIL_GAP_MIN) * math.sin(math.pi * min(tv / 0.8, 1.0) / 2) ** 2
+                lift = g * e ** 1.35 + (1.0 + SAIL_PILLOW * tv ** 0.6) * math.sin(math.pi * s) ** 0.8
                 row.append((px + nx * lift, py + ny * lift, pz + nz * lift))
             grid.append(row)
         # UVs in metres: u across (arc length along s), v along theta
@@ -329,7 +332,7 @@ def _louvres(coll, steel):
     up = lay["Upper"]
     d_back = up[-1][0] + up[-1][2] + 1.2
     white = C.principled("M_Louvre", (0.85, 0.86, 0.86), rough=0.45, metal=0.2)
-    C.night_emission(white, (0.2, 0.95, 0.75), 0.0, 0.6)
+    C.night_emission(white, (0.1, 0.9, 0.75), 0.0, 1.4)
     step = 4
     loop = C.offset_loop(plan.pts, plan.nrm, d_back)
     nl = len(loop)
@@ -364,37 +367,24 @@ def _louvres(coll, steel):
 
 
 def _screens(coll, d_back, plan):
-    frame = C.principled("M_ScreenFrame", (0.05, 0.05, 0.05), rough=0.5)
-    scr = C.new_material("M_Screen")
-    nt, b = scr.node_tree, C.bsdf_of(scr)
-    b.inputs["Base Color"].default_value = (0.01, 0.01, 0.01, 1)
-    b.inputs["Roughness"].default_value = 0.2
-    tc = nt.nodes.new("ShaderNodeTexCoord")
-    grad = nt.nodes.new("ShaderNodeTexGradient")
-    nt.links.new(tc.outputs["UV"], grad.inputs["Vector"])
-    ramp = nt.nodes.new("ShaderNodeValToRGB")
-    ramp.color_ramp.elements[0].color = (0.0, 0.35, 0.15, 1)
-    ramp.color_ramp.elements[1].color = (0.02, 0.08, 0.2, 1)
-    nt.links.new(grad.outputs["Fac"], ramp.inputs["Fac"])
-    nt.links.new(ramp.outputs["Color"], b.inputs["Emission Color"])
-    s = C.math_node(nt, "ADD", C.math_node(nt, "MULTIPLY", C.night_node(nt), 4.0), 6.0)
-    nt.links.new(s, b.inputs["Emission Strength"])
+    frame = C.principled("M_ScreenFrame", (0.78, 0.8, 0.8), rough=0.35, metal=0.6)   # light frame (interior ref)
+    scr = signage.screen_material()
     loop = C.offset_loop(plan.pts, plan.nrm, d_back - 0.5)
     out = []
-    for deg in (32, 148, 212, 328):
+    for deg in (0, 50, 130, 180, 230, 310):
         t = math.radians(deg)
         i = int(t / (2 * math.pi) * plan.n) % plan.n
         x, y = loop[i]
         nx, ny = plan.nrm[i]
         tx, ty = -ny, nx
-        w, h, zc = 26.0, 11.0, 31.0
+        w, h, zc = 34.0, 14.0, 30.5
         v = []
         for a, bb in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
             v.append((x + tx * a * w / 2, y + ty * a * w / 2, zc + bb * h / 2))
         back = [(px + nx * 0.8, py + ny * 0.8, pz) for px, py, pz in v]
         verts = v + back
         faces = [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)]
-        uv = [(0, 0), (0, 1), (1, 1), (1, 0)] + [(0, 0)] * 20
+        uv = [(1, 0), (1, 1), (0, 1), (0, 0)] + [(0, 0)] * 20   # read un-mirrored from the pitch
         obj = C.mesh_object(f"Screen_{deg}", verts, faces, coll, [scr, frame],
                             mat_indices=[0, 1, 1, 1, 1, 1], uvs=uv)
         out.append(obj.name)

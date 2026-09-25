@@ -241,3 +241,49 @@ def tree_library():
         p.display_type = "TEXTURED"
         models.append(p.name)
     return lib, models
+
+
+GRANITE_TILE_M = 4.8     # one texture tile: 4 x 8 slabs of 1.2 x 0.6 m in running bond
+
+
+def granite_images(px=1024, seed=7):
+    """Generate (once) a tileable granite-slab set named like the Poly Haven ones, so
+    pbr_material() and the web exporter treat it as a tiled texture (refs/v4/plaza_ground.jpg)."""
+    import numpy as np
+    if bpy.data.images.get("granite_slabs_Diffuse"):
+        return "granite_slabs"
+    rng = np.random.default_rng(seed)
+    m = GRANITE_TILE_M
+    yy, xx = np.mgrid[0:px, 0:px].astype(np.float32) * (m / px)
+    row = np.floor(yy / 0.6).astype(int)                       # 8 rows
+    xs = xx + (row % 2) * 0.6                                  # running bond
+    col = np.floor(xs / 1.2).astype(int) % 4
+    tone = rng.uniform(0.78, 1.18, (8, 4))[row, col]           # each slab its own tone
+    fx, fy = (xs % 1.2) / 1.2, (yy % 0.6) / 0.6
+    ex = np.minimum(fx, 1 - fx) * 1.2
+    ey = np.minimum(fy, 1 - fy) * 0.6
+    joint = np.clip(np.minimum(ex, ey) / 0.008, 0, 1)          # 0 in the 16 mm joints
+    grain = rng.normal(1.0, 0.06, (px, px)).astype(np.float32)
+    base = np.array([0.36, 0.34, 0.31], np.float32)            # warm grey granite (linear)
+    alb = base[None, None, :] * (tone * grain)[..., None]
+    alb = alb * joint[..., None] + np.array([0.16, 0.155, 0.15])[None, None, :] * (1 - joint[..., None])
+    rough = 0.45 + 0.4 * (1 - joint) + rng.normal(0, 0.03, (px, px))
+    h = joint
+    gx = (np.roll(h, -1, 1) - np.roll(h, 1, 1)) * 0.5
+    gy = (np.roll(h, -1, 0) - np.roll(h, 1, 0)) * 0.5
+    n = np.stack([-gx * 2.0, -gy * 2.0, np.ones_like(h)], -1)
+    n /= np.linalg.norm(n, axis=-1, keepdims=True)
+
+    def put(kind, rgb, srgb):
+        img = bpy.data.images.new(f"granite_slabs_{kind}", px, px, alpha=False)
+        if srgb:
+            rgb = np.where(rgb <= 0.0031308, rgb * 12.92, 1.055 * np.power(np.clip(rgb, 0, 1), 1 / 2.4) - 0.055)
+        else:
+            img.colorspace_settings.name = "Non-Color"
+        a = np.concatenate([np.clip(rgb, 0, 1), np.ones((px, px, 1), np.float32)], -1)
+        img.pixels.foreach_set(a.astype(np.float32).ravel())
+        img.pack()
+    put("Diffuse", alb, True)
+    put("Rough", np.repeat(rough[..., None], 3, -1), False)
+    put("nor_gl", n * 0.5 + 0.5, False)
+    return "granite_slabs"

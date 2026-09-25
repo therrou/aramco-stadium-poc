@@ -147,9 +147,15 @@ export const GROUND_MAP_GLSL = /* glsl */ `
 #endif
 `;
 
-export type Detail = "grass" | "net" | "concrete" | "ground";
+export type Detail = "grass" | "net" | "concrete" | "ground" | "slab";
+/**
+ * v4: the granite-slab paving (M_Paving, M_Plaza) is a regular running bond, so it skips the anti-tiling second
+ * lookup (the rotated copy broke the joints into patches) and takes half the ground mottling; the podium's
+ * night glow still applies.
+ */
 const ROUTES: [RegExp, Detail][] = [
-  [/^M_(Lawn|Sand|Paving|Plaza|Asphalt)\b/, "ground"],
+  [/^M_(Paving|Plaza)\b/, "slab"],
+  [/^M_(Lawn|Sand|Asphalt)\b/, "ground"],
   [/^M_Grass\b/, "grass"],
   [/^M_Net\b/, "net"],
   [/^M_(Concrete|ConcreteRiser|StepNosing|Soffit)\b/, "concrete"],

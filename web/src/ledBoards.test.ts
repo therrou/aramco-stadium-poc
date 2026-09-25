@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BOARDS, boardU, panelAt, LED_GLSL_BOARDS, isLedBoard } from "./ledBoards";
+import { BOARDS, boardU, panelAt, LED_GLSL_BOARDS, isLedBoard, whiteFromDark, fitLogo } from "./ledBoards";
 
 describe("pitch LED ad boards", () => {
   it("runs one continuous coordinate round the board loop (metres), starting at the south-west corner", () => {
@@ -21,5 +21,18 @@ describe("pitch LED ad boards", () => {
     expect(LED_GLSL_BOARDS).toContain("dot( cameraB - pB, -outward )");
     expect(isLedBoard("M_LEDBoard.web")).toBe(true);
     expect(isLedBoard("M_BoardBack.web")).toBe(false);
+  });
+});
+
+describe("v4 ad logos (user-supplied aramco / AKQA)", () => {
+  it("turns the black-on-white aramco wordmark into a white mark with the darkness as alpha", () => {
+    const px = whiteFromDark(new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255]));
+    expect([...px.slice(0, 4)]).toEqual([255, 255, 255, 255]);   // black glyph: opaque white
+    expect(px[7]).toBe(0);                                        // white background: transparent
+  });
+  it("fits a logo inside its box, centred, keeping the aspect ratio", () => {
+    const [x, y, w, h] = fitLogo(1200, 587, 0, 0, 2048, 115);
+    expect(h).toBeCloseTo(115); expect(w / h).toBeCloseTo(1200 / 587);
+    expect(x + w / 2).toBeCloseTo(1024); expect(y).toBeCloseTo(0);
   });
 });

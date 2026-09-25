@@ -135,6 +135,10 @@ def classify(mat):
         else:
             info["kind"] = "procedural"
     col = tuple(b.inputs["Emission Color"].default_value[:3])
+    ei = _upstream(b.inputs["Emission Color"], {"TEX_IMAGE"}, depth=2)
+    if ei is not None and ei.image is not None:
+        info["images"]["emission"] = ei.image.name            # UV-mapped LED content (signage.py)
+        col = (1.0, 1.0, 1.0)
     ne = _night_emission(b)
     if mat.name == "M_SailSkin":
         info["special"] = "sailLeds"                             # decision D7

@@ -57,6 +57,8 @@ def web_material(info, baked):
         b.inputs["Emission Strength"].default_value = 1.0
         if baked.get("emission"):
             image(baked["emission"], b.inputs["Emission Color"])
+        elif "emission" in info["images"]:
+            image(info["images"]["emission"], b.inputs["Emission Color"])
         mat["emDay"] = em["day"]
         mat["emNight"] = baked.get("emNight", em["night"])
     return mat

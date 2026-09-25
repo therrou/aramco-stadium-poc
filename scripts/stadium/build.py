@@ -10,14 +10,14 @@ import os
 
 import bpy
 
-from . import params, common, pitch, bowl
+from . import params, common, signage, pitch, bowl
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_DIR = os.path.join(REPO, "data")
 
 
 def _reload():
-    for m in (params, common, pitch, bowl):
+    for m in (params, common, signage, pitch, bowl):
         importlib.reload(m)
     for name in ("assets", "landscape", "nightlights", "shell", "site", "lighting", "cameras"):
         try:

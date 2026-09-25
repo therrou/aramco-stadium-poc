@@ -3,7 +3,7 @@ import { MAX_CHARTS, chartUniforms, chartsOfMesh, pitchLinesGlsl, type Chart } f
 import { STATE_NIGHT } from "./lightingState";
 import { SUN_VIS_GLSL } from "./sunShadow";
 import { PLANAR_GLSL, isPlanarMaterial } from "./planarReflect";
-import { BOARDS, LED_EMISSIVE_GLSL, LED_GLSL_BOARDS, isLedBoard, ledUniforms } from "./ledBoards";
+import { BOARDS, LED_EMISSIVE_GLSL, LED_GLSL_BOARDS, isLedBoard, ledUniforms, ribbonTexture } from "./ledBoards";
 import { BICUBIC_GLSL, CONCRETE_GLSL, GRASS_GLSL, GROUND_GLSL, GROUND_MAP_GLSL, NET, NET_GLSL, detailFor } from "./detail";
 
 const LM_RE = /vec4 lightMapTexel = texture2D\( lightMap, vLightMapUv \);\s*vec3 lightMapIrradiance = lightMapTexel\.rgb \* lightMapIntensity;/;
@@ -146,6 +146,25 @@ float sailLeds( vec3 pB ) {
 }
 `;
 
+/**
+ * v4: the sail skin is translucent in Cycles (shell._add_translucency: 0.35 x (1 - n)) over an underside that
+ * glows teal-mint (shell._under_material: (3.5 (1 - h)^1.6 + 1) x n, h the height 9..45 m), so at golden hour
+ * the lobes read mint from outside. The web skin is opaque: that transmitted glow is added as emission.
+ * k scales it against the Cycles pairs (renders/web_v4).
+ */
+export const SAIL_GLOW = { k: 1.5, translucency: 0.35, color: [0.3, 0.95, 0.75] } as const;
+export const sailGlow = (z: number, n: number) => {
+  const h = Math.min(Math.max((z - 9) / 36, 0), 1);
+  return SAIL_GLOW.k * SAIL_GLOW.translucency * (1 - n) * n * (3.5 * (1 - h) ** 1.6 + 1);
+};
+export const SAIL_GLOW_GLSL = /* glsl */ `
+vec3 sailGlow( vec3 pB ) {
+  float h = clamp( ( pB.z - 9.0 ) / 36.0, 0.0, 1.0 );
+  float g = ${SAIL_GLOW.k.toFixed(3)} * ${SAIL_GLOW.translucency.toFixed(3)} * ( 1.0 - uNight ) * uNight * ( 3.5 * pow( 1.0 - h, 1.6 ) + 1.0 );
+  return g * vec3( ${SAIL_GLOW.color.map((v) => v.toFixed(2)).join(", ")} );
+}
+`;
+
 export interface SharedUniforms {
   /** S1: the sun (irradiance and view-space direction), shared with the outdoor model; set by main.ts. */
   uSun?: { value: THREE.Color }; uSunDirView?: { value: THREE.Vector3 }; uAmbient?: { value: THREE.Color };
@@ -211,19 +230,26 @@ export function toCoatedSail(m: THREE.MeshStandardMaterial) {
  * lenses showed their backs too: a ring of halos (9 % of the roof-glow area clipped vs 3 % in Cycles).
  * The viewer caps the lens and draws its front only. Tuned in Task 8.
  */
+/** v4 team dugouts: canopy glass (pitch.py _dugouts). */
+export const DUGOUT_GLASS_RE = /^M_DugoutGlass\b/;
+export const DUGOUT_GLASS = { opacity: 0.4, env: 1.0, lmBoost: 3.0, milk: [0.72, 0.78, 0.8] as [number, number, number], emDay: 0.45, emNight: 0.06 } as const;
+/** v4 LED ribbons on the tier fronts (signage.py). */
+export const RIBBON_RE = /^M_FasciaLED\b/;
 export const FLOOD_LENS_RE = /^M_FloodLens\b/;
 export const FLOOD_LENS_MAX = 30;
 
 /** Spec v3 part 2: the detail shaders (detail.ts) and what each does after the albedo map. */
 const FLAT_NORMAL_B = "vec3 nB = normalize( cross( dFdx( vWorldPosB ), dFdy( vWorldPosB ) ) );\n";
-const DETAIL_GLSL = { grass: GRASS_GLSL, net: NET_GLSL, concrete: CONCRETE_GLSL, ground: GROUND_GLSL } as const;
+const DETAIL_GLSL = { grass: GRASS_GLSL, net: NET_GLSL, concrete: CONCRETE_GLSL, ground: GROUND_GLSL, slab: GROUND_GLSL } as const;
 /** Light added after the lightmap (D5: the podium's night glow on the plaza). */
-const DETAIL_LIGHT: Partial<Record<keyof typeof DETAIL_GLSL, string>> = { ground: "irradiance += podiumGlow( vWorldPosB ) * uNight;" };
+const PODIUM_LIGHT = "irradiance += podiumGlow( vWorldPosB ) * uNight;";
+const DETAIL_LIGHT: Partial<Record<keyof typeof DETAIL_GLSL, string>> = { ground: PODIUM_LIGHT, slab: PODIUM_LIGHT };
 const DETAIL_MAP = {
   grass: "diffuseColor.rgb = grassAlbedo( vWorldPosB );",
   net: FLAT_NORMAL_B + `diffuseColor.rgb = vec3( ${NET.color.toFixed(2)} ); diffuseColor.a = netCoverage( netPlane( vWorldPosB, nB ) );`,
   concrete: FLAT_NORMAL_B + "diffuseColor.rgb *= concreteDetail( vWorldPosB, nB );",
   ground: GROUND_MAP_GLSL + "diffuseColor.rgb *= groundDetail( vWorldPosB );",
+  slab: "diffuseColor.rgb *= mix( vec3( 1.0 ), groundDetail( vWorldPosB ), 0.5 );",
 } as const;
 
 /** The lights chunk a stadium material compiles: patched or stock, the pitch lines' UVs, then any detail light. */
@@ -297,9 +323,19 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
     if (led) {                                        // pitch LED ad boards (ledBoards.ts): black panels lit by the ad
       ex.emDay = BOARDS.emDay; ex.emNight = BOARDS.emNight;
       mat.emissive.setRGB(1, 1, 1);
+      mat.emissiveMap = null;                       // v4: the glb carries Blender's board image; the web draws its own ads
       mat.color.setRGB(0.012, 0.012, 0.014);
       mat.roughness = 0.6;
       mat.envMapIntensity = 0.12;                   // the sky's sheen on the glossy face washed the ad out
+    }
+    if (RIBBON_RE.test(mat.name) && ribbonTexture.value) mat.emissiveMap = ribbonTexture.value;   // v4: sponsor ads, not the placeholder
+    if (DUGOUT_GLASS_RE.test(mat.name)) {            // v4: the canopy sheet faces down, so its bake is the shaded underside
+      mat.opacity = DUGOUT_GLASS.opacity;           // (dark); Cycles shows clear glass lit by the sky: thin it, mirror the sky
+      mat.roughness = 0.05;
+      mat.metalness = 0;
+      mat.envMapIntensity = DUGOUT_GLASS.env;
+      mat.emissive.setRGB(...DUGOUT_GLASS.milk);   // milky polycarbonate: it scatters daylight, so it reads light from above
+      ex.emDay = DUGOUT_GLASS.emDay; ex.emNight = DUGOUT_GLASS.emNight;
     }
     for (const t of [mat.map, mat.normalMap, mat.roughnessMap, mat.metalnessMap, mat.emissiveMap]) if (t) t.anisotropy = Math.min(MAX_ANISO, maxAniso);
     if (detail === "grass") mat.map = null;           // D1: the shader draws the grass; the 1024 px bake is not needed
@@ -310,7 +346,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
       mat.side = THREE.FrontSide;
     }
     mat.userData.lmB = { value: null as THREE.Texture | null };
-    mat.lightMapIntensity = Math.PI;        // Cycles diffuse bake is E/π; three multiplies by albedo/π
+    mat.lightMapIntensity = Math.PI * (DUGOUT_GLASS_RE.test(mat.name) ? DUGOUT_GLASS.lmBoost : 1);   // Cycles diffuse bake is E/π; three multiplies by albedo/π
     const env = envIntensityOf(mat.name);
     if (env !== undefined) mat.envMapIntensity = env;
     if (OVERLAY_RE.test(mat.name)) {
@@ -327,7 +363,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
         .replace("#include <worldpos_vertex>", "#include <worldpos_vertex>\nvec4 wpB = modelMatrix * vec4( transformed, 1.0 ); vWorldPosB = vec3( wpB.x, -wpB.z, wpB.y );");
       s.fragmentShader = s.fragmentShader
         .replace("#include <shadowmap_pars_fragment>", "#include <shadowmap_pars_fragment>\n" + SUN_VIS_GLSL)
-        .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + soMinDefine(ex.special) + (planar ? "#define PLANAR_REFLECT\n" : "") + PARS + (led ? LED_GLSL_BOARDS : "") + (ex.special === "sailLeds" ? LED_GLSL : "")
+        .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + soMinDefine(ex.special) + (planar ? "#define PLANAR_REFLECT\n" : "") + PARS + (led ? LED_GLSL_BOARDS : "") + (ex.special === "sailLeds" ? LED_GLSL + SAIL_GLOW_GLSL : "")
           + (lines ? pitchLinesGlsl(lineCharts!.length) : ""))
         .replace("#include <lights_fragment_maps>", lightsChunkFor(chunk, useLightmaps, lines, detail));
       if (detail) s.fragmentShader = s.fragmentShader
@@ -337,7 +373,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
         .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n" + LED_EMISSIVE_GLSL);
       if (ex.special === "sailLeds")
         s.fragmentShader = s.fragmentShader.replace("#include <emissivemap_fragment>",
-          "#include <emissivemap_fragment>\ntotalEmissiveRadiance = min( totalEmissiveRadiance * sailLeds( vWorldPosB ), vec3( " + LED_MAX.toFixed(2) + " ) );");
+          "#include <emissivemap_fragment>\ntotalEmissiveRadiance = min( totalEmissiveRadiance * sailLeds( vWorldPosB ), vec3( " + LED_MAX.toFixed(2) + " ) ) + sailGlow( vWorldPosB );");
     };
     mat.customProgramCacheKey = () => `stadium-${useLightmaps}-${ex.special ?? ""}${lines ? `-lines${lineCharts!.length}` : ""}-${detail ?? ""}${planar ? "-planar" : ""}${led ? "-led" : ""}`;
     mat.needsUpdate = true;

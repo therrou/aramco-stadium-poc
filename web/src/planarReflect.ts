@@ -17,7 +17,8 @@ import { isInside } from "./route";
  * reflections along the view. A tap-only blur left ghosted copies.
  */
 /** gain: day and night strength (Cycles' day plaza shows only a faint sheen; at night the lit facade reads clearly). */
-export const PLANAR = { planeZ: 0.04, maxEyeZ: 80, scale: 0.5, gain: { day: 0.3, night: 0.7 }, minRough: 0.5, lodPerRough: 7, smear: 0.12 } as const;
+/** v4: honed granite slabs (Cycles shows the joints and only a soft sheen at golden hour): gain and blur retuned. */
+export const PLANAR = { planeZ: 0.04, maxEyeZ: 80, scale: 0.5, gain: { day: 0.12, night: 0.4 }, minRough: 0.62, lodPerRough: 7, smear: 0.12 } as const;
 const PLANAR_RE = /^M_(Paving|Plaza)\b/;
 export const isPlanarMaterial = (name: string) => PLANAR_RE.test(name);
 /** Worth rendering: the eye is outside the bowl and low enough to see the plaza at a glancing angle. */

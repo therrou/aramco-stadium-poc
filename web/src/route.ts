@@ -7,8 +7,9 @@ import { easeInOutCubic, type Pose } from "./flyto";
  * The shell is described in plan by two superellipses (scripts/stadium/params.py): the oculus
  * (OCULUS_A/B/N) and the shell's outline (SHELL_A/B/N). `s` is the normalised plan position between
  * them (0 at the oculus rim, 1 at the outline). The envelope below was measured from the raw glb
- * (sails__M_SailSkin, structure__M_Steel): the skin sits at z 56-58 up to s 0.8 and drops to the podium
- * (z 9) by s 1; the roof trusses hang down to ~48 m (s < 0.5), ~41 m at s 0.7, ~34 m at s 0.8.
+ * (sails__M_SailSkin, structure__M_Steel; v4 sails: 16 puffier lobes): the skin sits at z 54-59 up to s 0.8
+ * and drops to the podium (z 9) by s 1, with lobes bulging to 1.07 x the outline; the roof trusses hang down
+ * to ~48 m (s < 0.5), ~41 m at s 0.7, ~34 m at s 0.8.
  */
 const OC = { a: 76, b: 63, n: 2.35 }, SH = { a: 138, b: 121, n: 2.25 };
 const sup = (x: number, y: number, e: { a: number; b: number; n: number }) =>
@@ -27,7 +28,7 @@ const ramp = (s: number, pts: [number, number][]) => {
 /** Lowest point of the roof structure (trusses) above plan position s. */
 export const roofUnder = (s: number) => ramp(s, [[0.5, 46], [0.8, 32], [1, 8]]);
 /** Top of the sail skin above plan position s. */
-export const roofTop = (s: number) => ramp(s, [[0.8, 58], [1, 9]]);
+export const roofTop = (s: number) => ramp(s, [[0.8, 59], [1, 9]]);
 
 /** Inside the bowl's air volume (under the roof, or in the oculus column below the rim). */
 export function isInside(p: V3) {
@@ -39,10 +40,12 @@ export function isInside(p: V3) {
  * A camera position that is inside geometry: the roof and sails, the shell's base, or the ground. `margin`
  * widens the roof band downward (a resting orbit eye keeps clear of the trusses, so flights from it can too).
  */
+/** Outermost plan radius of the sail lobes (S), measured 1.071 on the v4 glb. */
+export const SHELL_BULGE = 1.08;
 export function blocked(p: V3, margin = 0) {
   const { S, O, s } = plan(p), z = p[2];
   if (z < 1) return true;
-  if (O < 0.97 || S > 1.04) return false;
+  if (O < 0.97 || S > SHELL_BULGE) return false;
   const top = roofTop(s) + 3;
   return (z > roofUnder(s) - margin && z < top) || (s > 0.88 && z < top);
 }

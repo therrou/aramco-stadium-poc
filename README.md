@@ -14,12 +14,12 @@ replaced with the official plan without touching the model.
 
 | Part | Detail |
 |---|---|
-| Shell | 18 overlapping sails twisting 55° clockwise (from `refs/sdb_09.jpg`); a quarter-ellipse dome, 276 × 242 m, rim at 56 m; silver panelled skin with scattered LED points; translucent cream undersides that glow at night |
+| Shell | 16 broad, puffy sails twisting 55° counter-clockwise (twist concentrated near the oculus), each covering its clockwise neighbour (user-confirmed against `refs/v4/`); a quarter-ellipse dome, 276 × 242 m, rim at 56 m; silver skin with scattered LED points; translucent undersides that glow teal-mint at night |
 | Roof structure | Compression ring, 36 radial trusses following the twist, purlins and bracing, 120 floodlight heads |
-| Bowl | Lower tier 24 rows, club tier 3 rows with glazed suites, upper tier 22–29 rows (wavy top edge); aisles with half-steps, lower-tier vomitories, LED fascia, louvre band, 4 corner screens |
+| Bowl | Lower tier 24 rows, club tier 3 rows with glazed suites, upper tier 22–29 rows (wavy top edge); aisles with half-steps, lower-tier vomitories, three LED ad ribbons (pitch wall, club front, upper-tier front), louvre band, 6 big screens with a match frame (`scripts/stadium/signage.py`) |
 | Seats | **46,074** instanced seats (StadiumDB lists 46,096), each with section/row/seat attributes |
-| Pitch | Mowing stripes, FIFA markings, goals and nets, LED boards, glazed dugouts |
-| Site | Elevated scalloped podium walkway on columns, 3 snaking bridges, a palm-lined entrance plaza, a park with about 2,200 trees, King Fahad Rd with night street lighting, parking with about 2,200 cars, city blocks |
+| Pitch | Mowing stripes, FIFA markings, goals and nets, LED boards, team dugouts (curved canopy on white ribs, two tiers of bucket seats, technical area) |
+| Site | Two levels (`refs/v4/announcement.jpg`): a wide level-2 deck with a smooth edge swelling into arms at the bridges and the sign, two lightwells with stairs, the "aramco stadium" sign on the deck parapet; level 1 underneath is a shopping arcade (glazed shopfronts, white columns and soffit). Granite-slab paving, 4 snaking bridges, a palm-lined entrance plaza, a park with trees, King Fahad Rd with night street lighting, parking, city blocks |
 | Vegetation | Poly Haven jacaranda, coastal and small broadleaf trees, plus procedural date palms (two variants, pinnate fronds). Palms are denser near the stadium |
 | Ground | Poly Haven textures: aerial sand, leafy grass, square paving and asphalt, all tiled at real-world size with large-scale colour variation to hide the repeat |
 

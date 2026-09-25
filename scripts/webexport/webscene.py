@@ -106,9 +106,12 @@ def build():
             f.material_index = 0
         bm.to_mesh(me)
         bm.free()
-        while me.uv_layers:
-            me.uv_layers.remove(me.uv_layers[0])
-        me.uv_layers.new(name="UVMap")                          # TEXCOORD_0
+        keep = mname in groups.KEEP_UV_MATERIALS and "UVMap" in me.uv_layers
+        for layer in list(me.uv_layers):
+            if not (keep and layer.name == "UVMap"):
+                me.uv_layers.remove(layer)
+        if not keep:
+            me.uv_layers.new(name="UVMap")                      # TEXCOORD_0
         me.uv_layers.new(name="LightmapUV")                     # TEXCOORD_1
         me.materials.append(bpy.data.materials[mname])          # swapped for the .web copy later
         obj = bpy.data.objects.new(me.name, me)

@@ -52,7 +52,8 @@ describe("material detail routing", () => {
 import { GROUND_GLSL, PODIUM_GLOW, podiumGlow } from "./detail";
 describe("D5 ground detail and the podium's night glow", () => {
   it("routes the site's ground materials", () => {
-    for (const m of ["M_Lawn.web", "M_Sand.web", "M_Paving.web", "M_Plaza.web", "M_Asphalt.web"]) expect(detailFor(m)).toBe("ground");
+    for (const m of ["M_Lawn.web", "M_Sand.web", "M_Asphalt.web"]) expect(detailFor(m)).toBe("ground");
+    for (const m of ["M_Paving.web", "M_Plaza.web"]) expect(detailFor(m)).toBe("slab");   // v4 granite slabs: no anti-tiling
     expect(GROUND_GLSL).toContain("vec3 groundDetail( vec3 pB )");
     expect(GROUND_GLSL).toContain("vec3 podiumGlow( vec3 pB )");
   });

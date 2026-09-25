@@ -1,8 +1,11 @@
 """Pitch: grass with mowing stripes, FIFA markings, goals, LED boards, dugouts."""
 import math
 
+import bpy
+
 from . import common as C
 from . import params as P
+from . import signage
 
 LINE_W = 0.12
 LINE_Z = 0.012
@@ -134,14 +137,112 @@ def _mat(x, y, z, rot_x=False):
     return m
 
 
+
+DUGOUT_L, DUGOUT_D = 14.0, 2.8      # shelter length along the touchline, depth (m)
+
+
+def _box(verts, faces, cx, cy, cz, sx, sy, sz):
+    k = len(verts)
+    for dx, dy, dz in ((-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1),
+                       (-1, -1, 1), (1, -1, 1), (1, 1, 1), (-1, 1, 1)):
+        verts.append((cx + dx * sx / 2, cy + dy * sy / 2, cz + dz * sz / 2))
+    faces += [(k, k + 3, k + 2, k + 1), (k + 4, k + 5, k + 6, k + 7), (k, k + 1, k + 5, k + 4),
+              (k + 1, k + 2, k + 6, k + 5), (k + 2, k + 3, k + 7, k + 6), (k + 3, k, k + 4, k + 7)]
+
+
+def _bucket_seat(verts, faces, x, y, z):
+    """Padded stadium bucket seat facing -Y (the pitch): pan, tall back, headrest, bolsters."""
+    _box(verts, faces, x, y, z + 0.45, 0.52, 0.5, 0.12)               # pan
+    _box(verts, faces, x, y + 0.26, z + 0.85, 0.52, 0.12, 0.72)       # back
+    _box(verts, faces, x, y + 0.27, z + 1.3, 0.3, 0.12, 0.2)          # headrest
+    for sx in (-0.29, 0.29):
+        _box(verts, faces, x + sx, y + 0.05, z + 0.62, 0.07, 0.55, 0.3)   # side bolsters
+    _box(verts, faces, x, y + 0.05, z + 0.2, 0.08, 0.08, 0.4)         # pedestal
+
+
+def _dugouts(coll, bw, dark, white):
+    """Team shelters: curved tinted canopy on white ribs over two tiers of padded
+    bucket seats, dark back wall and floor, technical-area line on the grass."""
+    canopy = C.principled("M_DugoutGlass", (0.55, 0.62, 0.66), rough=0.05, transmission=1.0)
+    frame = bpy.data.materials.get("M_ColumnWhite") or C.principled("M_ColumnWhite", (0.86, 0.86, 0.84), rough=0.4)
+    pad = C.principled("M_DugoutSeat", (0.03, 0.2, 0.11), rough=0.5)       # team green upholstery
+    floor = C.principled("M_DugoutFloor", (0.05, 0.05, 0.055), rough=0.85)
+    y_back = bw - 0.4
+    y_front = y_back - DUGOUT_D
+    arc = [(t, math.sin(t * math.pi / 2)) for t in [i / 10 for i in range(11)]]   # back -> front
+
+    def prof(t, e):                   # canopy section: 2.4 m at the back, 1.45 m at the lip
+        return y_back - DUGOUT_D * t, 1.45 + 0.95 * (1 - e ** 1.6)
+
+    for sx in (-12.0, 12.0):
+        tag = "E" if sx > 0 else "W"
+        x0, x1 = sx - DUGOUT_L / 2, sx + DUGOUT_L / 2
+        # canopy shell (single curved sheet) + end caps
+        v, f = [], []
+        for t, e in arc:
+            y, z = prof(t, e)
+            v += [(x0, y, z), (x1, y, z)]
+        for i in range(len(arc) - 1):
+            f.append((2 * i, 2 * i + 1, 2 * i + 3, 2 * i + 2))
+        for x, side in ((x0, 0), (x1, 1)):
+            k = len(v)
+            v += [(x, y_back, 0.0)] + [(x, *prof(t, e)) for t, e in arc] + [(x, y_front, 0.0)]
+            f.append(tuple(range(k, len(v))))
+        C.mesh_object(f"Dugout_{tag}_Canopy", v, f, coll, [canopy])
+        # white ribs along the canopy every ~2.3 m, plus the front lip beam
+        rv, re = [], []
+        n_ribs = 7
+        for r in range(n_ribs):
+            x = x0 + (x1 - x0) * r / (n_ribs - 1)
+            base = len(rv)
+            rv += [(x, *prof(t, e)) for t, e in arc]
+            re += [(base + i, base + i + 1) for i in range(len(arc) - 1)]
+            rv += [(x, y_back, 0.0), (x, y_back, prof(0, 0)[1])]
+            re.append((len(rv) - 2, len(rv) - 1))
+        rv += [(x0, *prof(1, 1)), (x1, *prof(1, 1))]
+        re.append((len(rv) - 2, len(rv) - 1))
+        ribs = C.mesh_object(f"Dugout_{tag}_Frame", rv, [], coll, edges=re)
+        C.tube_modifier(ribs, 0.045, frame, 6)
+        # back wall, floor platform with a raised rear tier
+        sv, sf = [], []
+        _box(sv, sf, sx, y_back + 0.05, 1.2, DUGOUT_L, 0.1, 2.4)
+        _box(sv, sf, sx, (y_back + y_front) / 2, 0.04, DUGOUT_L, DUGOUT_D, 0.08)
+        _box(sv, sf, sx, y_back - 0.6, 0.25, DUGOUT_L - 0.2, 1.1, 0.4)
+        C.mesh_object(f"Dugout_{tag}_Base", sv, sf, coll, [floor])
+        # two tiers of bucket seats (front on the floor, rear on the riser)
+        pv, pf = [], []
+        for row, (yy, zz, count) in enumerate(((y_back - 1.75, 0.08, 18), (y_back - 0.75, 0.45, 18))):
+            for i in range(count):
+                x = x0 + 0.7 + (DUGOUT_L - 1.4) * i / (count - 1)
+                _bucket_seat(pv, pf, x, yy, zz)
+        C.mesh_object(f"Dugout_{tag}_Seats", pv, pf, coll, [pad])
+        # technical area: dashed white line 1 m off the shelter, 1 m wider each side
+        lv, lf = [], []
+        ty = y_front - 1.0
+        for xa, xb, ya, yb in ((x0 - 1, x1 + 1, ty - 0.06, ty + 0.06),
+                               (x0 - 1.06, x0 - 0.94, ty, y_front + 0.2),
+                               (x1 + 0.94, x1 + 1.06, ty, y_front + 0.2)):
+            seg = 1.0 if xb - xa > 1 else yb - ya
+            if xb - xa > 1:
+                x = xa
+                while x < xb:
+                    k = len(lv)
+                    lv += [(x, ya, 0.012), (min(x + 0.6, xb), ya, 0.012), (min(x + 0.6, xb), yb, 0.012), (x, yb, 0.012)]
+                    lf.append((k, k + 1, k + 2, k + 3))
+                    x += 1.0
+            else:
+                k = len(lv)
+                lv += [(xa, ya, 0.012), (xb, ya, 0.012), (xb, yb, 0.012), (xa, yb, 0.012)]
+                lf.append((k, k + 1, k + 2, k + 3))
+        C.mesh_object(f"Dugout_{tag}_TechArea", lv, lf, coll, [white])
+
 def build(root):
     coll = C.collection("Pitch", root)
     grass = _grass_material()
     surround = C.principled("M_PitchSurround", (0.035, 0.11, 0.03), rough=0.9)
     white = C.principled("M_LineWhite", (0.85, 0.85, 0.82), rough=0.8)
     net = C.principled("M_Net", (0.95, 0.95, 0.95), rough=0.7, alpha=0.35)
-    board = C.principled("M_LEDBoard", (0.01, 0.01, 0.01), rough=0.3)
-    C.night_emission(board, (0.05, 0.75, 0.35), 0.3, 5.0)
+    board = signage.board_material()
     board_back = C.principled("M_BoardBack", (0.02, 0.02, 0.025), rough=0.6)
 
     L, W = P.PITCH_AREA_L / 2, P.PITCH_AREA_W / 2
@@ -164,7 +265,7 @@ def build(root):
         _goal(coll, mats, s)
 
     # LED advertising boards: 1 m tall, 5 m off the lines, open at the tunnel
-    boards_v, boards_f, mids = [], [], []
+    boards_v, boards_f, mids, uvs = [], [], [], []
     bl, bw = P.FIELD_L / 2 + 5.0, P.FIELD_W / 2 + 5.0
     segs = [((-bl, -bw), (bl, -bw)), ((bl, -bw), (bl, bw)),
             ((bl, bw), (4, bw)), ((-4, bw), (-bl, bw)), ((-bl, bw), (-bl, -bw))]
@@ -173,17 +274,11 @@ def build(root):
         boards_v += [(x0, y0, 0), (x1, y1, 0), (x1, y1, 0.95), (x0, y0, 0.95)]
         boards_f.append((k, k + 1, k + 2, k + 3))
         mids.append(0)
+        u = math.hypot(x1 - x0, y1 - y0) / signage.BOARD_PANEL_M
+        uvs += [(0, 0), (u, 0), (u, 1), (0, 1)]
     C.mesh_object("Pitch_LEDBoards", boards_v, boards_f, coll, [board, board_back],
-                  mat_indices=mids)
+                  mat_indices=mids, uvs=uvs)
 
     # dugouts on the north touchline (main stand is south, section 101)
-    shelter = C.principled("M_DugoutGlass", (0.8, 0.85, 0.85), rough=0.05, transmission=1.0)
-    for sx in (-12, 12):
-        x0, x1 = sx - 6, sx + 6
-        y0, y1 = bw - 2.4, bw - 0.4
-        v = [(x0, y0, 0), (x1, y0, 0), (x1, y1, 0), (x0, y1, 0),
-             (x0, y0, 1.35), (x1, y0, 1.35), (x1, y1, 1.6), (x0, y1, 1.6)]
-        f = [(4, 5, 6, 7), (2, 3, 7, 6), (1, 2, 6, 5), (0, 3, 7, 4)]
-        C.mesh_object(f"Dugout_{'E' if sx > 0 else 'W'}", v, f, coll, [shelter, board_back],
-                      mat_indices=[0, 1, 0, 0])
+    _dugouts(coll, bw, board_back, white)
     return coll

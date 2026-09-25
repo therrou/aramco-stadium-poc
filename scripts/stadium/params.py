@@ -35,14 +35,16 @@ SHELL_A, SHELL_B, SHELL_N = 138.0, 121.0, 2.25
 SHELL_Z_TOP = 56.0           # compression ring / oculus rim height
 PODIUM_Z = 9.0               # elevated walkway level; shell lands here
 SHELL_THETA_MAX = math.radians(97.0)
-SAIL_COUNT = 18
-SAIL_TWIST = -math.radians(55.0)  # CW (seen from above) from oculus to base, per refs/sdb_09
+SAIL_COUNT = 16                # broad lobes (refs/v4/announcement.jpg)
+SAIL_TWIST = math.radians(55.0)   # CCW (seen from above) from oculus to base (user-confirmed vs key visuals)
+SAIL_TWIST_EXP = 0.5              # < 1: the twist happens near the oculus, seams run radial at the base
+SAIL_LIFT_TRAILING = True         # each sail covers its clockwise neighbour (user: layers overlap CW)
 SAIL_OVERLAP = 0.16               # fraction of pitch each sail overlaps next
-SAIL_GAP_MAX = 5.0                # vent opening at the base (m)
+SAIL_GAP_MAX = 7.0                # vent opening at the base (m)
 SAIL_THICK = 0.45
 
 # --- site ----------------------------------------------------------------
-PODIUM_WIDTH = 14.0
+PODIUM_WIDTH = 30.0           # level-2 plaza around the shell (refs/v4/announcement.jpg)
 GROUND_SIZE = 2600.0
 
 NIGHT_PROP = "night"          # scene custom property 0 = day, 1 = night

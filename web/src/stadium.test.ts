@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import * as THREE from "three";
 import { BLOOM } from "./lighting";
 import { BOARDS, LED_EMISSIVE_GLSL } from "./ledBoards";
-import { FLOOD_LENS_MAX, LED_CELL, LED_COVER, LED_GLSL, LED_MAX, LED_R, setupStadiumMaterials } from "./stadium";
+import { sailGlow, DUGOUT_GLASS, DUGOUT_GLASS_RE, FLOOD_LENS_MAX, LED_CELL, LED_COVER, LED_GLSL, LED_MAX, LED_R, setupStadiumMaterials } from "./stadium";
 import { splitByGroup, GROUND_ENV, OVERLAY_RE, SAIL_NIGHT_ENV, SAIL_RE, envIntensityOf, sailEnvIntensity, SAIL_COAT, SPEC_OCC, SAIL_NIGHT_E, lightsChunkFor, overlayOffset, soMinDefine, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
 
 it("patches three r186 lights_fragment_maps (lightmap blend, no diffuse IBL, env blend)", () => {
@@ -146,4 +146,19 @@ it("LED ad boards: lit by their ad (day and night strengths), black surface, own
   m.onBeforeCompile(s, {} as THREE.WebGLRenderer);
   expect(s.fragmentShader).toContain(LED_EMISSIVE_GLSL);
   expect(Object.keys(s.uniforms)).toContain("uAds");
+});
+
+it("v4 sail glow: only between day and night, stronger toward the base", () => {
+  expect(sailGlow(20, 0)).toBe(0);
+  expect(sailGlow(20, 1)).toBe(0);
+  expect(sailGlow(12, 0.6)).toBeGreaterThan(sailGlow(50, 0.6));
+  expect(sailGlow(50, 0.6)).toBeCloseTo(1.5 * 0.35 * 0.4 * 0.6, 5);   // top: underside glow 1 x n
+});
+
+it("v4 dugout canopy glass is translucent and daylit, not the dark baked underside", () => {
+  expect(DUGOUT_GLASS_RE.test("M_DugoutGlass.web")).toBe(true);
+  expect(DUGOUT_GLASS_RE.test("M_ConcourseGlass.web")).toBe(false);
+  expect(DUGOUT_GLASS.opacity).toBeLessThan(0.5);                 // still see-through
+  expect(DUGOUT_GLASS.lmBoost).toBeGreaterThan(1);
+  expect(DUGOUT_GLASS.emDay).toBeGreaterThan(DUGOUT_GLASS.emNight);  // milky by day, not a lamp at night
 });

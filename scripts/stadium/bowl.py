@@ -13,6 +13,7 @@ import bpy
 
 from . import common as C
 from . import params as P
+from . import signage
 
 
 # --- tier layout ---------------------------------------------------------
@@ -269,8 +270,8 @@ def build(root):
     concrete = C.principled("M_Concrete", (0.52, 0.51, 0.49), rough=0.85)
     riser = C.principled("M_ConcreteRiser", (0.36, 0.36, 0.35), rough=0.85)
     soffit = C.principled("M_Soffit", (0.78, 0.78, 0.76), rough=0.7)
-    fascia = C.principled("M_FasciaLED", (0.01, 0.02, 0.015), rough=0.25)
-    C.night_emission(fascia, (0.1, 0.85, 0.45), 0.15, 4.0)
+    fascia = C.principled("M_Fascia", (0.02, 0.03, 0.025), rough=0.4)   # behind the LED ribbon
+    ribbon_mat = signage.ribbon_material()
     glass = C.principled("M_SuiteGlass", (0.6, 0.7, 0.72), rough=0.05, transmission=1.0)
     C.night_emission(glass, (1.0, 0.8, 0.55), 0.0, 1.2)
     seat_mat = C.principled("M_Seat", (0.03, 0.22, 0.12), rough=0.45)
@@ -322,6 +323,14 @@ def build(root):
         return tier_mat(j - 1)
 
     _sweep_var(plan, prof_u, "Tier_Upper", coll, [concrete, riser, fascia, soffit], mat_u)
+
+    # LED ribbons (interior ref): upper-tier front, club front, pitch-side wall of the lower tier
+    u0d, u0z = upper[0][0], upper[0][1]
+    signage.ribbon(coll, plan.pts, plan.nrm, u0d - 0.03, u0z - 1.3, u0z - 0.1, "Ribbon_Upper", ribbon_mat)
+    cd = lay["_l_end"] + P.CLUB["gap"] - 0.03
+    signage.ribbon(coll, plan.pts, plan.nrm, cd, lay["_l_top"] + 0.05, lay["_l_top"] + 0.85,
+                   "Ribbon_Club", ribbon_mat)
+    signage.ribbon(coll, plan.pts, plan.nrm, lower[0][0] - 0.03, 0.15, 1.1, "Ribbon_Lower", ribbon_mat)
 
     _vomitories(plan, lower, coll, concrete)
     _aisle_steps(plan, {"Lower": lower, "Upper": upper}, coll, concrete)

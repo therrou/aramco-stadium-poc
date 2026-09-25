@@ -26,6 +26,9 @@ export function boardU(x: number, y: number) {
 export const panelAt = (u: number, shift: number) => PANELS[(((Math.floor(u / BOARDS.panel) + shift) % 2) + 2) % 2];
 
 export const ledUniforms = { uAds: { value: null as THREE.Texture | null }, uAdTime: { value: 0 } };
+/** v4: the tier-front LED ribbons (signage.py: UV u = 48 m per repeat) show the same two ads, four 12 m panels. */
+export const RIBBON = { repeatM: 48, panels: 4, pxW: 1024, pxH: 80 } as const;
+export const ribbonTexture: { value: THREE.Texture | null } = { value: null };
 
 /**
  * GLSL (needs vWorldPosB, cameraPosition): the ad colour on the pitch side, black on the back. Reading
@@ -87,26 +90,70 @@ function swooshes(g: CanvasRenderingContext2D, y0: number, flip: boolean) {
   band(1560, 120, -160, "#7be07f", 0.5); band(1700, 380, 150, GREEN_DEEP, 0.9); band(820, 60, 120, "#58b8ff", 0.5);
 }
 
-function drawAramco(g: CanvasRenderingContext2D, y0: number) {
+/** Brand files (user-supplied, gitignored like the licensed font): web/public/brand/. */
+export const LOGOS = { aramco: "/brand/aramco_logo.png", akqa: "/brand/akqa_logo.png" } as const;
+type Logo = HTMLCanvasElement | HTMLImageElement | null;
+
+/** The aramco wordmark comes black on white (no alpha): its darkness becomes the alpha of a white mark. */
+export function whiteFromDark(rgba: Uint8ClampedArray) {
+  for (let i = 0; i < rgba.length; i += 4) {
+    const lum = (0.2126 * rgba[i] + 0.7152 * rgba[i + 1] + 0.0722 * rgba[i + 2]) / 255;
+    rgba[i + 3] = Math.round(Math.min(1, Math.max(0, (1 - lum) * 1.15)) * rgba[i + 3]);
+    rgba[i] = rgba[i + 1] = rgba[i + 2] = 255;
+  }
+  return rgba;
+}
+function whiteMark(img: HTMLImageElement): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const g = c.getContext("2d")!;
+  g.drawImage(img, 0, 0);
+  const d = g.getImageData(0, 0, c.width, c.height);
+  whiteFromDark(d.data);
+  g.putImageData(d, 0, 0);
+  return c;
+}
+/** Fit a logo (w x h) into a box, centred: [x, y, w, h]. */
+export function fitLogo(w: number, h: number, bx: number, by: number, bw: number, bh: number) {
+  const k = Math.min(bw / w, bh / h), fw = w * k, fh = h * k;
+  return [bx + (bw - fw) / 2, by + (bh - fh) / 2, fw, fh] as const;
+}
+const size = (l: HTMLCanvasElement | HTMLImageElement) => l instanceof HTMLImageElement ? [l.naturalWidth, l.naturalHeight] : [l.width, l.height];
+
+/** Aramco panel (user request): aramco blue and green, "POWERED BY" and the aramco logo in white. */
+function drawAramco(g: CanvasRenderingContext2D, y0: number, logo: Logo) {
   swooshes(g, y0, false);
   const cy = y0 + PX_H / 2;
   g.fillStyle = "#ffffff"; g.textBaseline = "middle"; g.textAlign = "right";
-  g.font = `900 72px "Archivo", sans-serif`;
-  g.fillText("POWERED BY", 1010, cy + 4);
-  const bx = 1040, bw = 520, bh = 124;
-  g.fillStyle = GREEN; g.beginPath(); g.roundRect(bx, cy - bh / 2, bw, bh, 10); g.fill();
-  g.fillStyle = "#ffffff"; g.textAlign = "center";
-  g.font = `800 96px "Nunito", "Archivo", sans-serif`;
-  g.fillText("aramco", bx + bw / 2, cy + 2);
+  g.font = `900 64px "Archivo", sans-serif`;
+  g.fillText("POWERED BY", 980, cy + 4);
+  if (logo) {
+    const [w, h] = size(logo);
+    const [x, y, fw, fh] = fitLogo(w, h, 1010, y0 + PX_H * 0.08, 640, PX_H * 0.84);
+    g.drawImage(logo, x, y, fw, fh);
+  } else {                                           // no logo file: the wordmark in type
+    g.textAlign = "left"; g.font = `800 104px "Nunito", "Archivo", sans-serif`;
+    g.fillText("aramco", 1020, cy + 2);
+  }
 }
 
-/** AKQA (user request): its own sign, white with the black serif logo, not the aramco ribbon. */
-function drawAkqa(g: CanvasRenderingContext2D, y0: number) {
+/** AKQA panel (user request): white, the AKQA logo centred. */
+function drawAkqa(g: CanvasRenderingContext2D, y0: number, logo: Logo) {
   g.fillStyle = "#ffffff"; g.fillRect(0, y0, PX_W, PX_H);
+  if (logo) {
+    const [w, h] = size(logo);
+    const [x, y, fw, fh] = fitLogo(w, h, 0, y0 + PX_H * 0.14, PX_W, PX_H * 0.72);
+    g.drawImage(logo, x, y, fw, fh);
+    return;
+  }
   g.fillStyle = "#000000"; g.textBaseline = "middle"; g.textAlign = "center";
   g.font = `700 132px "Playfair Display", "Times New Roman", serif`;
   g.fillText("AKQA", PX_W / 2, y0 + PX_H / 2 + 8);
 }
+
+const loadImage = (src: string) => new Promise<HTMLImageElement>((ok, fail) => {
+  const i = new Image(); i.onload = () => ok(i); i.onerror = fail; i.src = src;
+});
 
 /** A dark seam at both ends of every panel, so neighbouring signs read as separate boards (~0.25 m each side). */
 function seams(g: CanvasRenderingContext2D, y0: number) {
@@ -115,15 +162,32 @@ function seams(g: CanvasRenderingContext2D, y0: number) {
   g.fillRect(PX_W - SEAM_PX, y0, SEAM_PX, PX_H);
 }
 
-/** The ad atlas: aramco in the top row, AKQA in the bottom one. Redrawn once the web fonts arrive. */
+/** The ad atlas: aramco in the top row, AKQA in the bottom one; plus the ribbon strip (ribbonTexture).
+ * Both are redrawn once the web fonts and logos arrive. */
 export function makeAdAtlas(): THREE.CanvasTexture {
   const c = document.createElement("canvas");
   c.width = PX_W; c.height = PX_H * 2;
   const g = c.getContext("2d")!, tex = new THREE.CanvasTexture(c);
-  const draw = () => { drawAramco(g, 0); drawAkqa(g, PX_H); seams(g, 0); seams(g, PX_H); tex.needsUpdate = true; };
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
+  const r = document.createElement("canvas");
+  r.width = RIBBON.pxW * RIBBON.panels; r.height = RIBBON.pxH;
+  const rg = r.getContext("2d")!, rtex = new THREE.CanvasTexture(r);
+  const logos: { aramco: Logo; akqa: Logo } = { aramco: null, akqa: null };
+  const draw = () => {
+    drawAramco(g, 0, logos.aramco); drawAkqa(g, PX_H, logos.akqa); seams(g, 0); seams(g, PX_H); tex.needsUpdate = true;
+    for (let k = 0; k < RIBBON.panels; k++) {           // ribbon: aramco, AKQA, aramco, AKQA at half resolution
+      rg.save(); rg.translate(k * RIBBON.pxW, 0); rg.scale(RIBBON.pxW / PX_W, RIBBON.pxH / PX_H);
+      if (k % 2 === 0) drawAramco(rg, 0, logos.aramco); else drawAkqa(rg, 0, logos.akqa);
+      seams(rg, 0); rg.restore();
+    }
+    rtex.needsUpdate = true;
+  };
+  for (const t of [tex, rtex]) { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; }
+  rtex.wrapS = THREE.RepeatWrapping;
+  rtex.flipY = false;                                    // glTF UVs (v down), as the glb's own textures
+  ribbonTexture.value = rtex;
   draw();
-  Promise.all(['900 72px "Archivo"', '800 96px "Nunito"', '700 128px "Playfair Display"'].map((f) => document.fonts.load(f))).then(draw, () => {});
+  Promise.all(['900 64px "Archivo"', '800 104px "Nunito"', '700 128px "Playfair Display"'].map((f) => document.fonts.load(f))).then(draw, () => {});
+  loadImage(LOGOS.aramco).then((i) => { logos.aramco = whiteMark(i); draw(); }, () => {});
+  loadImage(LOGOS.akqa).then((i) => { logos.akqa = i; draw(); }, () => {});
   return tex;
 }

@@ -38,56 +38,158 @@ def _noise_material(name, c1, c2, scale, rough=0.9, bump=0.1):
     return mat
 
 
+def stone_paving(name, tone=1.0):
+    """Large-format granite slabs in running bond, each slab its own grey tone
+    (refs/v4/plaza_ground.jpg). A generated tileable texture set, so the web export
+    keeps the slabs sharp (tiled material, not a 1 texel/m procedural bake)."""
+    asset = assets.granite_images()
+    return assets.pbr_material(name, asset, assets.GRANITE_TILE_M,
+                               ((0.34 * tone, 0.32 * tone, 0.3 * tone), (0.4 * tone, 0.38 * tone, 0.35 * tone), 1.5),
+                               macro=0.12, tint=(tone, tone, tone), bump=0.6)
+
+
+# Broad, smooth arms of the level-2 deck (refs/v4/announcement.jpg): (azimuth deg,
+# extra width m, spread deg). Bridges leave from the arm tips; the sign arm is widest.
+DECK_ARMS = [(38.0, 12.0, 13.0), (-50.0, 12.0, 13.0), (140.0, 12.0, 13.0),
+             (212.0, 12.0, 12.0), (236.0, 20.0, 17.0)]
+
+
 def _podium_edge(phi):
-    """Outer edge of the walkway: scalloped, one lobe per sail."""
+    """Outer edge of the level-2 deck: one smooth curve around the shell that
+    swells into a few broad arms (no per-sail scallops)."""
     x, y = C.superellipse(P.SHELL_A, P.SHELL_B, P.SHELL_N, phi)
     r = math.hypot(x, y)
-    lobe = 0.5 + 0.5 * math.cos(P.SAIL_COUNT * phi + 1.2)
-    k = (r + P.PODIUM_WIDTH * (0.65 + 0.35 * lobe)) / r
+    deg = math.degrees(phi)
+    w = P.PODIUM_WIDTH * 0.75
+    for a, extra, spread in DECK_ARMS:
+        d = (deg - a + 180.0) % 360.0 - 180.0
+        w += extra * math.exp(-0.5 * (d / spread) ** 2)
+    k = (r + w) / r
     return x * k, y * k
 
 
+# Lightwells cut through the deck down to the shopping level, flanking the sign
+# (refs/v4/announcement.jpg): triangles in (azimuth deg, fraction wall -> edge).
+VOIDS = [((225.0, 0.30), (230.5, 0.80), (211.0, 0.74)),
+         ((247.0, 0.30), (241.5, 0.80), (261.0, 0.74))]
+DECK_RINGS = 24
+
+
+def _in_tri(p, tri):
+    (x1, y1), (x2, y2), (x3, y3) = tri
+    d1 = (p[0] - x2) * (y1 - y2) - (x1 - x2) * (p[1] - y2)
+    d2 = (p[0] - x3) * (y2 - y3) - (x2 - x3) * (p[1] - y3)
+    d3 = (p[0] - x1) * (y3 - y1) - (x3 - x1) * (p[1] - y1)
+    neg = d1 < 0 or d2 < 0 or d3 < 0
+    pos = d1 > 0 or d2 > 0 or d3 > 0
+    return not (neg and pos)
+
+
+def in_void(deg, f):
+    deg = deg % 360
+    return any(_in_tri((deg, f), tri) for tri in VOIDS)
+
+
+def _proud(a, b_, off=0.03):
+    """Segment a-b pushed `off` m to its right (outside of a CCW deck edge / lightwell rim)."""
+    dx, dy = b_[0] - a[0], b_[1] - a[1]
+    ln = math.hypot(dx, dy) or 1.0
+    nx, ny = dy / ln * off, -dx / ln * off
+    return (a[0] + nx, a[1] + ny), (b_[0] + nx, b_[1] + ny)
+
+
 def _podium(coll, paving, under, glass, steel):
-    n = 720
+    """Level 2: the wide elevated plaza the shell lands on. Radial rings so the
+    lightwells can be cut out; level 1 (shops, columns) sits underneath."""
+    n, R = 720, DECK_RINGS
     lay = bowl.layout()
     plan = bowl.Plan()
     up = lay["Upper"]
     d_wall = up[-1][0] + up[-1][2] + 1.2 + 7.0
     inner = C.offset_loop(plan.pts, plan.nrm, d_wall)
     step = len(inner) / n
-    verts, faces, mids = [], [], []
     top, bot = P.PODIUM_Z, P.PODIUM_Z - 1.4
-    for i in range(n):
-        phi = 2 * math.pi * i / n
-        ix, iy = inner[int(i * step)]
-        ox, oy = _podium_edge(phi)
-        verts += [(ix, iy, top), (ox, oy, top), (ox, oy, bot), (ix, iy, bot)]
-    for i in range(n):
-        a, b = 4 * i, 4 * ((i + 1) % n)
-        faces += [(a, b, b + 1, a + 1), (a + 1, b + 1, b + 2, a + 2), (a + 2, b + 2, b + 3, a + 3)]
-        mids += [0, 1, 1]
-    C.mesh_object("Podium_Deck", verts, faces, coll, [paving, under], mat_indices=mids)
-    # glass balustrade on the outer edge
+    edge = [_podium_edge(2 * math.pi * i / n) for i in range(n)]
+    ins = [inner[int(i * step)] for i in range(n)]
+
+    def pt(i, r):
+        i = int(round(i)) % n
+        f = r / R
+        return (ins[i][0] + (edge[i][0] - ins[i][0]) * f, ins[i][1] + (edge[i][1] - ins[i][1]) * f)
+
+    solid = [[not in_void(360.0 * (i + 0.5) / n, (r + 0.5) / R) for r in range(R)] for i in range(n)]
+    verts, faces, mids = [], [], []
     gv, gf = [], []
+    lv, lf = [], []
+
+    def glow(a, b_):
+        """Thin lit band just proud of a fascia, near its top (outward = away from the cell)."""
+        k = len(lv)
+        lv.extend([(*a, top - 0.38), (*b_, top - 0.38), (*b_, top - 0.18), (*a, top - 0.18)])
+        lf.append((k, k + 1, k + 2, k + 3))
+
+    def quad(a, b_, z0, z1, m):
+        k = len(verts)
+        verts.extend([(*a, z0), (*b_, z0), (*b_, z1), (*a, z1)])
+        faces.append((k, k + 1, k + 2, k + 3))
+        mids.append(m)
+
+    def rail(a, b_, lit=True):
+        if lit:
+            glow(*_proud(a, b_))
+        k = len(gv)
+        gv.extend([(*a, top), (*b_, top), (*b_, top + 1.15), (*a, top + 1.15)])
+        gf.append((k, k + 1, k + 2, k + 3))
+
     for i in range(n):
-        ox, oy = _podium_edge(2 * math.pi * i / n)
-        gv += [(ox, oy, top), (ox, oy, top + 1.15)]
+        for r in range(R):
+            if not solid[i][r]:
+                continue
+            p00, p10, p11, p01 = pt(i, r), pt(i + 1, r), pt(i + 1, r + 1), pt(i, r + 1)
+            k = len(verts)
+            verts.extend([(*p00, top), (*p10, top), (*p11, top), (*p01, top)])
+            faces.append((k, k + 1, k + 2, k + 3))
+            mids.append(0)
+            k = len(verts)
+            verts.extend([(*p00, bot), (*p01, bot), (*p11, bot), (*p10, bot)])
+            faces.append((k, k + 1, k + 2, k + 3))
+            mids.append(1)
+            if r == R - 1:
+                quad(p01, p11, bot, top, 1)                 # outer fascia
+            if r == 0:
+                quad(p10, p00, bot, top, 1)                 # against the concourse
+            # lightwell rims: wall + glass balustrade where a neighbour is cut away
+            # (rail segments run so their right-hand side faces the void)
+            if r > 0 and not solid[i][r - 1]:
+                quad(p00, p10, bot, top, 1); rail(p10, p00)
+            if r < R - 1 and not solid[i][r + 1]:
+                quad(p11, p01, bot, top, 1); rail(p01, p11)
+            if not solid[(i - 1) % n][r]:
+                quad(p01, p00, bot, top, 1); rail(p00, p01)
+            if not solid[(i + 1) % n][r]:
+                quad(p10, p11, bot, top, 1); rail(p11, p10)
+    deck = C.mesh_object("Podium_Deck", verts, faces, coll, [paving, under], mat_indices=mids)
+    # glass balustrade + lit line on the outer edge
     for i in range(n):
-        a, b = 2 * i, 2 * ((i + 1) % n)
-        gf.append((a, b, b + 1, a + 1))
+        rail(edge[i], edge[(i + 1) % n])
     C.mesh_object("Podium_Balustrade", gv, gf, coll, [glass])
-    # columns under the deck: two rings
+    strip = C.principled("M_PodiumStrip", (0.9, 0.85, 0.75), rough=0.3)
+    C.night_emission(strip, (1.0, 0.8, 0.55), 1.0, 6.0)
+    C.mesh_object("Podium_EdgeGlow", lv, lf, coll, [strip])
+    _void_stairs(coll, paving, under, pt, n, R, top)
+    # level 1 columns: three rings, none inside a lightwell
     cv, ce = [], []
-    for ring_k in (0.35, 0.85):
+    for f in (0.36, 0.64, 0.9):
         for i in range(0, n, 10):
-            phi = 2 * math.pi * i / n
-            ix, iy = inner[int(i * step)]
-            ox, oy = _podium_edge(phi)
-            x, y = ix + (ox - ix) * ring_k, iy + (oy - iy) * ring_k
+            if in_void(360.0 * i / n, f):
+                continue
+            x, y = pt(i, f * R)
             cv += [(x, y, 0.0), (x, y, bot)]
             ce.append((len(cv) - 2, len(cv) - 1))
     cols = C.mesh_object("Podium_Columns", cv, [], coll, edges=ce)
-    C.tube_modifier(cols, 0.55, steel, 12)
+    white = bpy.data.materials.get("M_ColumnWhite") or C.principled("M_ColumnWhite", (0.86, 0.86, 0.84), rough=0.4)
+    C.tube_modifier(cols, 0.55, white, 12)
+    _shopfronts(coll, inner, step, n, bot)
     # soffit strip lights along the edge (emissive, night)
     lv, lf = [], []
     for i in range(n):
@@ -98,10 +200,101 @@ def _podium(coll, paving, under, glass, steel):
     for i in range(n):
         a, b = 2 * i, 2 * ((i + 1) % n)
         lf.append((a, a + 1, b + 1, b))
-    strip = C.principled("M_PodiumStrip", (0.9, 0.85, 0.75), rough=0.3)
-    C.night_emission(strip, (1.0, 0.8, 0.55), 0.0, 5.0)
-    C.mesh_object("Podium_LightStrip", lv, lf, coll, [strip])
+    C.mesh_object("Podium_LightStrip", lv, lf, coll, [bpy.data.materials["M_PodiumStrip"]])
 
+
+
+def _void_stairs(coll, paving, under, pt, n, R, top):
+    """A straight flight in each lightwell, from the deck down to the shopping level."""
+    verts, faces, mids = [], [], []
+    width, riser = 5.0, 0.18
+    steps = int(round(top / riser))
+    for tri in VOIDS:
+        (d0, f0), (d1, f1), (d2, f2) = tri
+        # from the middle of the outer side (ground) toward the inner tip (deck level)
+        lo = pt((d1 + d2) / 2 / 360 * n, (f1 + f2) / 2 * R - 1.2)
+        hi = pt(d0 / 360 * n, f0 * R + 2.0)
+        dx, dy = hi[0] - lo[0], hi[1] - lo[1]
+        ln = math.hypot(dx, dy)
+        ux, uy = dx / ln, dy / ln
+        sx, sy = -uy * width / 2, ux * width / 2
+        run = ln / steps
+        for k in range(steps):
+            a0, a1 = k * run, (k + 1) * run
+            z = (k + 1) * riser
+            c = [(lo[0] + ux * a0 + sx, lo[1] + uy * a0 + sy), (lo[0] + ux * a1 + sx, lo[1] + uy * a1 + sy),
+                 (lo[0] + ux * a1 - sx, lo[1] + uy * a1 - sy), (lo[0] + ux * a0 - sx, lo[1] + uy * a0 - sy)]
+            b = len(verts)
+            verts += [(x, y, z) for x, y in c] + [(x, y, z - riser) for x, y in c]
+            faces += [(b, b + 3, b + 2, b + 1), (b + 4, b + 7, b + 3, b), (b + 1, b + 2, b + 6, b + 5)]
+            mids += [0, 1, 1]
+            # stringer faces (sides) down to the ground
+            faces += [(b + 3, b + 7, b + 6, b + 2), (b, b + 1, b + 5, b + 4)]
+            mids += [1, 1]
+    C.mesh_object("Podium_Stairs", verts, faces, coll, [paving, under], mat_indices=mids)
+
+
+SHOP_RING = 0.22      # fraction from the concourse wall to the walkway edge
+SHOP_BLOCK, SHOP_GAP = 34, 6   # samples per retail unit run / open passage (1 sample ~1.3 m)
+
+
+def _shopfronts(coll, inner, step, n, bot):
+    """Glazed retail units under the walkway (refs/v4/plaza_ground.jpg): white
+    mullions, an opaque signage band, warm lit interiors, passages between runs."""
+    glass = C.new_material("M_ShopGlass")
+    nt, b = glass.node_tree, C.bsdf_of(glass)
+    b.inputs["Base Color"].default_value = (0.1, 0.12, 0.13, 1)
+    b.inputs["Roughness"].default_value = 0.04
+    b.inputs["Metallic"].default_value = 0.5
+    b.inputs["Emission Color"].default_value = (1.0, 0.83, 0.62, 1)
+    # shop interiors: each unit a different brightness (Voronoi cell per ~9 m)
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    vor = nt.nodes.new("ShaderNodeTexVoronoi")
+    vor.inputs["Scale"].default_value = 0.11
+    nt.links.new(tc.outputs["Object"], vor.inputs["Vector"])
+    sep = nt.nodes.new("ShaderNodeSeparateColor")
+    nt.links.new(vor.outputs["Color"], sep.inputs[0])
+    unit = C.math_node(nt, "ADD", C.math_node(nt, "MULTIPLY", sep.outputs[0], 0.7), 0.3)
+    level = C.math_node(nt, "ADD", C.math_node(nt, "MULTIPLY", C.night_node(nt), 0.9), 0.04)
+    nt.links.new(C.math_node(nt, "MULTIPLY", unit, level), b.inputs["Emission Strength"])
+    glass.diffuse_color = (0.1, 0.12, 0.13, 1)
+    frame = bpy.data.materials.get("M_ColumnWhite") or C.principled("M_ColumnWhite", (0.86, 0.86, 0.84), rough=0.4)
+    band = C.principled("M_ShopBand", (0.92, 0.92, 0.9), rough=0.35)
+    C.night_emission(band, (1.0, 0.95, 0.88), 0.0, 1.2)
+
+    z_band0, z_band1, z_top = 3.6, 4.5, bot - 0.25
+    pts = []
+    for i in range(n):
+        ix, iy = inner[int(i * step)]
+        ox, oy = _podium_edge(2 * math.pi * i / n)
+        pts.append((ix + (ox - ix) * SHOP_RING, iy + (oy - iy) * SHOP_RING))
+    verts, faces, mids = [], [], []
+    mv, me = [], []
+
+    def quad(a, b_, z0, z1, m):
+        k = len(verts)
+        verts.extend([(a[0], a[1], z0), (b_[0], b_[1], z0), (b_[0], b_[1], z1), (a[0], a[1], z1)])
+        faces.append((k, k + 1, k + 2, k + 3))
+        mids.append(m)
+
+    period = SHOP_BLOCK + SHOP_GAP
+    for i in range(n):
+        if i % period >= SHOP_BLOCK:
+            continue
+        a, b_ = pts[i], pts[(i + 1) % n]
+        quad(a, b_, 0.0, z_band0, 0)
+        quad(a, b_, z_band0, z_band1, 1)
+        quad(a, b_, z_band1, z_top, 0)
+        if i % 2 == 0 or i % period == SHOP_BLOCK - 1:
+            p = a if i % 2 == 0 else b_
+            mv += [(p[0], p[1], 0.0), (p[0], p[1], z_top)]
+            me.append((len(mv) - 2, len(mv) - 1))
+        for z in (0.05, z_band0, z_band1, z_top):
+            mv += [(a[0], a[1], z), (b_[0], b_[1], z)]
+            me.append((len(mv) - 2, len(mv) - 1))
+    C.mesh_object("Shop_Glazing", verts, faces, coll, [glass, band], mat_indices=mids)
+    mul = C.mesh_object("Shop_Mullions", mv, [], coll, edges=me)
+    C.tube_modifier(mul, 0.07, frame, 4)
 
 def _bezier(pts, samples):
     """Catmull-Rom through pts [(x, y, z)]."""
@@ -175,9 +368,7 @@ def _ground(coll):
     asphalt = assets.pbr_material("M_Asphalt", "asphalt_02", 3.0,
                                   ((0.05, 0.05, 0.055), (0.09, 0.09, 0.095), 0.5), macro=0.2,
                                   tint=(0.55, 0.55, 0.55))
-    plaza = assets.pbr_material("M_Plaza", "square_tiles_03", 2.0,
-                                ((0.55, 0.52, 0.48), (0.62, 0.6, 0.56), 1.5), macro=0.15,
-                                tint=(1.1, 1.08, 1.05))
+    plaza = stone_paving("M_Plaza", tone=0.72)
     h = P.GROUND_SIZE / 2
     C.mesh_object("Ground", [(-h, -h, -0.05), (h, -h, -0.05), (h, h, -0.05), (-h, h, -0.05)],
                   [(0, 1, 2, 3)], coll, [sand])
@@ -191,7 +382,7 @@ def _ground(coll):
         r = 400 + 40 * math.sin(3 * a + wob[0]) + 25 * math.sin(5 * a + wob[1])
         r += 90 * max(0.0, math.cos(a - math.radians(-40))) ** 3
         park.append((r * math.cos(a) * 1.05, r * math.sin(a), -0.02))
-        plz.append((C.superellipse(P.SHELL_A + 32, P.SHELL_B + 32, 2.2, a) + (-0.01,)))
+        plz.append((C.superellipse(P.SHELL_A + P.PODIUM_WIDTH + 18, P.SHELL_B + P.PODIUM_WIDTH + 18, 2.2, a) + (-0.01,)))
     verts = park + plz
     faces = [(i, (i + 1) % n, n + (i + 1) % n, n + i) for i in range(n)]
     C.mesh_object("Park_Lawn", verts, faces, coll, [lawn])
@@ -396,10 +587,8 @@ def _fan_zone(coll, paving):
 def build(root):
     from . import landscape as L
     coll = C.collection("Site", root)
-    paving = assets.pbr_material("M_Paving", "square_tiles_03", 2.0,
-                                 ((0.7, 0.68, 0.64), (0.78, 0.76, 0.72), 3.0), macro=0.1,
-                                 tint=(1.25, 1.22, 1.18))
-    under = C.principled("M_DeckUnder", (0.7, 0.7, 0.68), rough=0.7)
+    paving = stone_paving("M_Paving", tone=0.8)
+    under = C.principled("M_DeckUnder", (0.88, 0.87, 0.85), rough=0.6)   # white soffit (plaza ref)
     glass = C.principled("M_Balustrade", (0.8, 0.9, 0.9), rough=0.05, transmission=1.0)
     steel = bpy.data.materials.get("M_Steel") or C.principled("M_Steel", (0.82, 0.83, 0.84), rough=0.35, metal=0.8)
     _podium(coll, paving, under, glass, steel)

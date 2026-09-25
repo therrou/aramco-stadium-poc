@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { runJobs, AssetError, fetchJson } from "./loader";
+import * as THREE from "three";
+import { runJobs, AssetError, fetchJson, collect, type Manifest } from "./loader";
 
 const ok = (v: string) => async (p: (f: number) => void) => { p(0.5); p(1); return v; };
 const fail = async () => { throw new Error("404"); };
@@ -40,4 +41,17 @@ describe("fetchJson (final review 8)", () => {
   it("throws an HTTP error naming the file otherwise", async () => {
     await expect(fetchJson("/a/sections.json", "sections.json", res(404, null))).rejects.toThrow("HTTP 404 for sections.json");
   });
+});
+
+it("A7: lightmaps with mips are sampled trilinear; single-level ones stay linear", () => {
+  const withMips = new THREE.Texture(), flat = new THREE.Texture();
+  withMips.mipmaps = [{}, {}, {}] as any;
+  flat.mipmaps = [{}] as any;
+  const m = { stadium: "s.glb", seats: "b", sections: "x", cameras: "c", trees: null, rgbmRange: 16, version: 1,
+    states: { day: { night: 0, exposure: 0, env: null, lightmaps: { bowl: "a.ktx2", site: "b.ktx2" } },
+              golden: { night: 0.6, exposure: 0, env: null, lightmaps: {} }, night: { night: 1, exposure: 0, env: null, lightmaps: {} } } } as Manifest;
+  const a = collect(m, new Map<string, unknown>([["a.ktx2", withMips], ["b.ktx2", flat]]));
+  expect(a.lightmaps.day.bowl.minFilter).toBe(THREE.LinearMipmapLinearFilter);
+  expect(a.lightmaps.day.site.minFilter).toBe(THREE.LinearFilter);
+  expect(a.lightmaps.day.bowl.generateMipmaps).toBe(false);
 });

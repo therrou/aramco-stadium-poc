@@ -63,6 +63,10 @@ cp "$RAW/seats.bin" "$RAW/sections.json" "$RAW/cameras.json" "$OUT/"
 find "$RAW" \( -path "*/lightmaps/*.png" -o -path "*/impostors/*.png" \) | while read -r png; do
   rel=${png#"$RAW/"}; dst="$OUT/${rel%.png}.ktx2"; mkdir -p "$(dirname "$dst")"
   case "$rel" in
+    # A7 (v2): mips on the far site only (seen at 6.5 m/texel from every aerial, where it shimmered). Mips on
+    # every group cost +3.6 MB (37.2 MB > 35 MB budget; zstd 22 and UASTC RDO saved < 0.2 MB). RGBM filters
+    # approximately across levels, far less visible than the aliasing without them.
+    lightmaps/*/site.png) ktx create --format R8G8B8A8_UNORM --assign-tf linear --encode uastc --uastc-quality 2 --zstd 18 --generate-mipmap "$png" "$dst" ;;
     lightmaps/*) ktx create --format R8G8B8A8_UNORM --assign-tf linear --encode uastc --uastc-quality 2 --zstd 18 "$png" "$dst" ;;
     impostors/*) ktx create --format R8G8B8A8_SRGB --encode uastc --uastc-quality 2 --zstd 18 --generate-mipmap "$png" "$dst" ;;
   esac

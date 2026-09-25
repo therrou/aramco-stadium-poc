@@ -55,3 +55,9 @@ frames, much like the Cycles night reference. Night means: Aerial_Dusk 49.6 (Cyc
 
 The lenses are still visible from inside the bowl (`CAM_Bowl` night), so FrontSide faces the pitch. Clipped share at
 `CAM_Aerial_Dusk` night went from 2.81 % to 2.49 % (Cycles 2.10 %). Roof-glow box tuning is in Task 8.
+
+## After A7 (lightmap mips)
+
+Mips on every lightmap group came to 37.21 MB (budget 35 MB). zstd 22 gave 37.19 and UASTC RDO λ 0.5–1 saved 4–7 %
+per file, so neither was enough. Only the far `site` lightmaps (all 3 states, 11 levels, trilinear) carry mips:
+**34.53 MB** total. The other groups are single-level, as before.

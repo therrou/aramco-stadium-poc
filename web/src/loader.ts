@@ -116,6 +116,9 @@ export function collect(m: Manifest, out: Map<string, unknown>): Assets {
       const t = out.get(f) as THREE.Texture;
       t.colorSpace = THREE.NoColorSpace;
       t.channel = 1;                                    // TEXCOORD_1 = LightmapUV
+      // A7 (v2): the KTX2 lightmaps carry mips (optimize_web.sh); without them distant charts shimmered
+      t.minFilter = (t.mipmaps?.length ?? 0) > 1 ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
+      t.generateMipmaps = false;
       lightmaps[s][g] = t;
     }
     env[s] = m.states[s].env ? (out.get(m.states[s].env!) as THREE.DataTexture) : null;

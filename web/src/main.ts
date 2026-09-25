@@ -10,7 +10,7 @@ import { SeatField, visibleSections, SEAT_LOD_DIST } from "./seats";
 import { SectionPatches } from "./sectionPatches";
 import { CameraRig } from "./camera";
 import { cameraPose, sectionFraming, type Pose } from "./flyto";
-import { onClick } from "./picking";
+import { DepthProbe, acceptPatchHit, onClick } from "./picking";
 import { reduce, initialState, parseLighting, type Action } from "./state";
 import { STATES, type State } from "./loader";
 import { setupStadiumMaterials, type SharedUniforms } from "./stadium";
@@ -19,13 +19,20 @@ import { missingLightmaps } from "./lightingState";
 import { setupTrees } from "./trees";
 
 const params = new URLSearchParams(location.search);
+/** Camera exposure (stops) in the section view: the CAM_Seat_* cameras' value. */
+const SECTION_EXP = 0.1;
 
 async function boot() {
   const missing = missingCapabilities(probe());
   if (missing.length) return showFatal(`Missing: ${missing.join(", ")}.`);
   const canvas = document.getElementById("view") as HTMLCanvasElement;
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance",
-    reversedDepthBuffer: !params.has("noreverse") });   // Task 13b (A); ignored without EXT_clip_control
+  let renderer: THREE.WebGLRenderer;
+  try {                                               // final review 7: never leave a blank page
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance",
+      reversedDepthBuffer: !params.has("noreverse") });   // Task 13b (A); ignored without EXT_clip_control
+  } catch (e) {
+    return showFatal(`Could not start WebGL: ${(e as Error).message}`);
+  }
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   const L = makeLoaders(renderer);
   const done = new Map<string, unknown>();
@@ -40,8 +47,14 @@ async function boot() {
     }
   };
   const assets = await attempt();
-  hideOverlay();
-  start(renderer, assets);
+  try {
+    start(renderer, assets);
+    hideOverlay();
+  } catch (e) {
+    console.error(e);
+    renderer.setAnimationLoop(null);
+    showFatal(`The viewer failed to start: ${(e as Error).message}`);
+  }
 }
 
 function start(renderer: THREE.WebGLRenderer, a: Assets) {
@@ -51,8 +64,11 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const avail = mockAvailability(table, idx);
   const rig = new CameraRig(renderer.domElement);
   const overview = cameraPose(a.cameras["CAM_Aerial_SW"]);
+  // final review 2: exposure follows each flight; back at the overview it is CAM_Aerial_SW's, not ?cam's
+  const overviewExp = a.cameras["CAM_Aerial_SW"].exposure ?? -0.4;
   const camParam = params.get("cam");
-  rig.jump(camParam && a.cameras[camParam] ? cameraPose(a.cameras[camParam]) : overview);
+  const camDef = camParam ? a.cameras[camParam] : undefined;
+  rig.jump(camDef ? cameraPose(camDef) : overview, camDef?.exposure ?? overviewExp);
   const camera = rig.camera;
   const shared: SharedUniforms = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: a.manifest.rgbmRange }, uNight: { value: 0 } };
   // one "lightmaps present" flag for materials and Lighting: every state needs every group, else no lightmaps at all
@@ -71,7 +87,8 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const startState = parseLighting(params.get("state"));
   const lighting = new Lighting(renderer, scene, a, groups, [...emissive], startState, shared, useLightmaps);
   const seats = new SeatField(table, idx, a.sections.sections, avail, lighting.outdoor);
-  const patches = new SectionPatches(table, idx, avail, lighting.outdoor);
+  const tierOf = new Map(a.sections.sections.map((s) => [Number(s.id), s.tier as string]));
+  const patches = new SectionPatches(table, idx, avail, lighting.outdoor, (id) => tierOf.get(id));
   scene.add(seats.mesh, patches.mesh);
   if (a.trees) { setupTrees(a.trees, a.impostors, lighting.outdoor); scene.add(a.trees.scene); }
   const composer = makeComposer(renderer, scene, camera);
@@ -93,13 +110,13 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   let app = { ...initialState, lighting: startState };
   const lightingChanged = (l: State) => lighting.request(l);
   const secById = new Map(a.sections.sections.map((s) => [Number(s.id), s]));
-  const ray = new THREE.Raycaster();
+  const ray = new THREE.Raycaster(), probe = new DepthProbe(renderer);
   const dispatch = (act: Action) => {
     const prev = app;
     app = reduce(app, act);
     if (app === prev) return;
-    if (act.type === "section" && app.view.kind === "section") rig.flyTo(sectionFraming(secById.get(app.view.section)!));
-    if (act.type === "back") rig.flyTo(overview);
+    if (act.type === "section" && app.view.kind === "section") rig.flyTo(sectionFraming(secById.get(app.view.section)!), SECTION_EXP);
+    if (act.type === "back") rig.flyTo(overview, overviewExp);
     if (act.type === "lighting") lightingChanged(app.lighting);
     draw();
   };
@@ -119,20 +136,19 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   onClick(renderer.domElement, (ndc) => {
     ray.setFromCamera(ndc, rig.camera);
     const hit = ray.intersectObject(patches.mesh, false)[0];
-    dispatch(hit ? { type: "section", section: patches.sectionOfFace(hit.faceIndex!) } : { type: "none" });
+    const wall = hit ? probe.distance(a.stadium.scene, rig.camera, ndc) : undefined;   // final review 6
+    dispatch(hit && acceptPatchHit(hit.distance, wall) ? { type: "section", section: patches.sectionOfFace(hit.faceIndex!) } : { type: "none" });
   });
   addEventListener("keydown", (e) => e.key === "Escape" && dispatch({ type: "back" }));
   draw();
 
   const clock = new THREE.Clock();
-  const camDef = camParam ? a.cameras[camParam] : undefined;
   const frame = (dt: number) => {
     rig.update(dt);
     const vis = visibleSections(toBlender(camera.position), a.sections.sections, SEAT_LOD_DIST, app.view.kind === "section" ? app.view.section : -1);
     seats.setVisibleSections(vis);
     patches.setHidden(vis);
-    const camExp = app.view.kind === "overview" ? (camDef?.exposure ?? -0.4) : 0.1;
-    lighting.update(dt, camExp, camera);
+    lighting.update(dt, rig.exposure, camera);
     composer.render(dt);
   };
   renderer.setAnimationLoop(() => {

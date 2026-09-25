@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runJobs, AssetError } from "./loader";
+import { runJobs, AssetError, fetchJson } from "./loader";
 
 const ok = (v: string) => async (p: (f: number) => void) => { p(0.5); p(1); return v; };
 const fail = async () => { throw new Error("404"); };
@@ -29,5 +29,15 @@ describe("runJobs", () => {
     expect(out.get("stadium.glb")).toBe("S");
     expect(aRuns).toBe(0);
     expect(new AssetError("x", new Error("y")).file).toBe("x");
+  });
+});
+
+describe("fetchJson (final review 8)", () => {
+  const res = (status: number, body: unknown) => (async () => ({ ok: status < 400, status, json: async () => body })) as unknown as typeof fetch;
+  it("returns the parsed body on 200", async () => {
+    expect(await fetchJson("/a/cameras.json", "cameras.json", res(200, { a: 1 }))).toEqual({ a: 1 });
+  });
+  it("throws an HTTP error naming the file otherwise", async () => {
+    await expect(fetchJson("/a/sections.json", "sections.json", res(404, null))).rejects.toThrow("HTTP 404 for sections.json");
   });
 });

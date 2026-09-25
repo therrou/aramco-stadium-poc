@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CameraRig, poseAt } from "./camera";
+import { CameraRig, MAX_POLAR, MIN_DISTANCE_M, exposureAt, polarLimit, poseAt } from "./camera";
 import type { Pose } from "./flyto";
 
 const A: Pose = { eye: [0, -20, 35], target: [0, 0, 0], hfov: 50 };
@@ -88,3 +88,43 @@ describe("CameraRig vs. OrbitControls damping momentum (fix round 1)", () => {
 });
 
 const FLIGHT_S_TEST = 2; // > FLIGHT_S (1.5s), forces t to clamp to 1 in a single update()
+
+describe("camera exposure follows the flight (final review 2)", () => {
+  it("exposureAt eases between the ends like the pose", () => {
+    expect(exposureAt(-0.4, 0.1, 0)).toBe(-0.4);
+    expect(exposureAt(-0.4, 0.1, 1)).toBe(0.1);
+    expect(exposureAt(-0.4, 0.1, 0.5)).toBeCloseTo(-0.15, 10);
+    expect(exposureAt(-0.4, 0.1, 0.1)).toBeLessThan(-0.39);          // slow start, no jump
+    let prev = -0.4;
+    for (let t = 0.02; t <= 1; t += 0.02) { const e = exposureAt(-0.4, 0.1, t); expect(e - prev).toBeLessThan(0.031); prev = e; }
+  });
+  it("the rig interpolates exposure with the pose and lands on the target value", () => {
+    const rig = new CameraRig(stubDom());
+    rig.jump(A, -0.4);
+    rig.flyTo(B, 0.1);
+    rig.update(0.75);
+    expect(rig.exposure).toBeCloseTo(exposureAt(-0.4, 0.1, 0.5), 10);
+    rig.update(1);
+    expect(rig.exposure).toBe(0.1);
+    rig.flyTo(A, -0.4);
+    rig.update(FLIGHT_S_TEST);
+    expect(rig.exposure).toBe(-0.4);
+  });
+});
+
+describe("orbit limits (final review 11)", () => {
+  it("controls stay above the horizon and off the target", () => {
+    const rig = new CameraRig(stubDom());
+    rig.jump(A);
+    expect(rig.controls.maxPolarAngle).toBeCloseTo(MAX_POLAR, 10);
+    expect(rig.controls.minDistance).toBe(MIN_DISTANCE_M);
+  });
+  it("a camera looking up keeps its own angle as the limit (no snap after landing)", () => {
+    const up: Pose = { eye: [0, 0, 2], target: [0, 100, 20], hfov: 50 };
+    expect(polarLimit(up)).toBeGreaterThan(Math.PI / 2);
+    const rig = new CameraRig(stubDom());
+    rig.jump(up);
+    rig.update(1 / 60);
+    expect(rig.pose().eye[2]).toBeCloseTo(2, 6);
+  });
+});

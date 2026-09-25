@@ -82,12 +82,19 @@ export async function fetchManifest(): Promise<Manifest> {
   return r.json();
 }
 
+/** Final review 8: a 404 page must not reach JSON.parse; the error names the file. */
+export async function fetchJson(url: string, file: string, f: typeof fetch = fetch) {
+  const r = await f(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status} for ${file}`);
+  return r.json();
+}
+
 export function assetJobs(m: Manifest, L: ReturnType<typeof makeLoaders>): Job<unknown>[] {
   const jobs: Job<unknown>[] = [
     { file: m.stadium, run: (p) => L.gltf.loadAsync(BASE + m.stadium, pct(p)) },
     { file: m.seats, run: (p) => { L.file.setResponseType("arraybuffer"); return L.file.loadAsync(BASE + m.seats, pct(p)); } },
-    { file: m.sections, run: async () => (await fetch(BASE + m.sections)).json() },
-    { file: m.cameras, run: async () => (await fetch(BASE + m.cameras)).json() },
+    { file: m.sections, run: () => fetchJson(BASE + m.sections, m.sections) },
+    { file: m.cameras, run: () => fetchJson(BASE + m.cameras, m.cameras) },
   ];
   if (m.trees) jobs.push({ file: m.trees.glb, optional: true, run: (p) => L.gltf.loadAsync(BASE + m.trees!.glb, pct(p)) });
   for (const s of STATES) {

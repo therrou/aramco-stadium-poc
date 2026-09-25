@@ -60,3 +60,18 @@ describe("D7 moulded seat near the camera", () => {
     expect(SEAT_NEAR_M).toBeGreaterThan(20);
   });
 });
+
+import { nearSections, NEAR_SEAT_CAP } from "./seats";
+it("D7: moulded seats go to the nearest sections first, within a seat budget (triangle budget, D6)", () => {
+  const cam: [number, number, number] = doc.sections[0].view.eye;
+  const ids = nearSections(cam, doc.sections, SEAT_NEAR_M, NEAR_SEAT_CAP);
+  const bySeats = doc.sections.filter((s) => ids.has(Number(s.id))).reduce((a, s) => a + s.seats, 0);
+  expect(bySeats).toBeLessThanOrEqual(NEAR_SEAT_CAP);
+  expect(ids.has(Number(doc.sections[0].id))).toBe(true);           // the camera's own section first
+  for (const s of doc.sections) {
+    let worst = 0;
+    const n = nearSections(s.view.eye, doc.sections, SEAT_NEAR_M, NEAR_SEAT_CAP);
+    worst = Math.max(worst, doc.sections.filter((x) => n.has(Number(x.id))).reduce((a, x) => a + x.seats, 0));
+    expect(worst).toBeLessThanOrEqual(NEAR_SEAT_CAP);
+  }
+});

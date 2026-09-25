@@ -18,11 +18,24 @@ export function seatGeometry() {
   return g;
 }
 
-/** D7 (v3): sections whose centroid is within this distance draw the moulded seat. */
-export const SEAT_NEAR_M = 35;
+/** D7 (v3): sections whose centroid is within this distance may draw the moulded seat... */
+export const SEAT_NEAR_M = 28;
+/** ...nearest first, up to this many seats, so the moulded seats add <= ~0.3 M triangles (budget 2 M). */
+export const NEAR_SEAT_CAP = 2500;
+export function nearSections(camB: V3, sections: Section[], dist: number, cap: number) {
+  const d = (s: Section) => Math.hypot(s.centroid[0] - camB[0], s.centroid[1] - camB[1], s.centroid[2] - camB[2]);
+  const out = new Set<number>();
+  let n = 0;
+  for (const s of sections.filter((x) => d(x) < dist).sort((a, b) => d(a) - d(b))) {
+    if (n + s.seats > cap) break;
+    out.add(Number(s.id));
+    n += s.seats;
+  }
+  return out;
+}
 
 /**
- * D7 (v3): moulded stadium seat, ~180 tris, same slot as seatGeometry (front +X, origin at the tread, 0.44 m
+ * D7 (v3): moulded stadium seat, ~150 tris, same slot as seatGeometry (front +X, origin at the tread, 0.44 m
  * wide): a dished pan with a raised front lip, a cupped back reclined 12 degrees, and a riser stem. Vertex
  * colours carry contact shading (undersides, the stem and the back's rear darker); instance colours tint it.
  */
@@ -32,11 +45,11 @@ export function seatGeometryHi() {
     for (let i = 0; i < p.count; i++) { const v = f(p.getX(i), p.getY(i), p.getZ(i)); p.setXYZ(i, v[0], v[1], v[2]); }
     return g;
   };
-  const pan = bend(new THREE.BoxGeometry(0.40, 0.035, 0.44, 4, 1, 4), (x, y, z) => {
+  const pan = bend(new THREE.BoxGeometry(0.40, 0.035, 0.44, 4, 1, 3), (x, y, z) => {
     const w = 1 - (z / 0.22) ** 2, lip = Math.max(0, (x - 0.12) / 0.08);
     return [x, y - 0.014 * w + 0.012 * lip * lip, z];
   }).rotateZ((-4 * Math.PI) / 180).translate(0.03, 0.44, 0);
-  const back = bend(new THREE.BoxGeometry(0.03, 0.44, 0.44, 1, 3, 4), (x, y, z) => [x - 0.03 * (1 - (z / 0.22) ** 2), y, z])
+  const back = bend(new THREE.BoxGeometry(0.03, 0.44, 0.44, 1, 3, 3), (x, y, z) => [x - 0.03 * (1 - (z / 0.22) ** 2), y, z])
     .rotateZ((12 * Math.PI) / 180).translate(-0.2, 0.7, 0);
   const stem = new THREE.BoxGeometry(0.05, 0.42, 0.07).translate(-0.15, 0.21, 0);
   const parts = [pan, back, stem].map((g, k) => {

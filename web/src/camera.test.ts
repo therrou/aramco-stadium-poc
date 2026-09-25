@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CameraRig, MAX_POLAR, MIN_DISTANCE_M, exposureAt, polarLimit, poseAt } from "./camera";
+import { CameraRig, LOOK_HFOV, MAX_POLAR, MIN_DISTANCE_M, exposureAt, polarLimit, poseAt, zoomedPose } from "./camera";
 import type { Pose } from "./flyto";
 
 const A: Pose = { eye: [0, -20, 35], target: [0, 0, 0], hfov: 50 };
@@ -126,5 +126,22 @@ describe("orbit limits (final review 11)", () => {
     rig.jump(up);
     rig.update(1 / 60);
     expect(rig.pose().eye[2]).toBeCloseTo(2, 6);
+  });
+});
+
+describe("zoom (Review Focus 2)", () => {
+  const p = { eye: [0, -100, 50] as [number, number, number], target: [0, 0, 0] as [number, number, number], hfov: 60 };
+  it("orbit mode dollies along the view line, clamped to MIN_DISTANCE_M", () => {
+    const z = zoomedPose(p, 0.5, "orbit");
+    expect(z.target).toEqual(p.target);
+    expect(Math.hypot(...z.eye)).toBeCloseTo(Math.hypot(...p.eye) * 0.5, 6);
+    expect(Math.hypot(...zoomedPose(p, 1e-6, "orbit").eye)).toBeCloseTo(MIN_DISTANCE_M, 6);
+  });
+  it("look mode (seat view) narrows the fov and never moves the eye", () => {
+    const z = zoomedPose(p, 0.5, "look");
+    expect(z.eye).toEqual(p.eye);
+    expect(z.hfov).toBe(30);
+    expect(zoomedPose(p, 0.01, "look").hfov).toBe(LOOK_HFOV[0]);
+    expect(zoomedPose(p, 10, "look").hfov).toBe(LOOK_HFOV[1]);
   });
 });

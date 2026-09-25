@@ -37,21 +37,47 @@ export function polarLimit(p: Pose) {
   return r > 0 ? Math.max(MAX_POLAR, Math.acos(Math.min(1, Math.max(-1, d[2] / r))) + 1e-3) : MAX_POLAR;
 }
 
+export type RigMode = "orbit" | "look";
+/** Seat view zoom range (hfov, deg). */
+export const LOOK_HFOV = [25, 90] as const;
+export const ZOOM_S = 0.35, AUTO_ORBIT_SPEED = 0.6, MAX_DISTANCE_M = 2500;
+/** Zoom buttons: orbit dollies toward the target; look (seat view) changes the fov so the eye stays in the seat. */
+export function zoomedPose(p: Pose, f: number, mode: RigMode): Pose {
+  if (mode === "look") return { ...p, hfov: Math.min(LOOK_HFOV[1], Math.max(LOOK_HFOV[0], p.hfov * f)) };
+  const d = p.eye.map((v, k) => v - p.target[k]), r = Math.hypot(...d);
+  const k = Math.min(MAX_DISTANCE_M, Math.max(MIN_DISTANCE_M, r * f)) / r;
+  return { ...p, eye: p.target.map((v, i) => v + d[i] * k) as V3 };
+}
+
 export class CameraRig {
   camera = new THREE.PerspectiveCamera(40, 1, NEAR_M, 8000);
   controls: OrbitControls;
   private hfov = 40;
   /** Camera exposure in stops (Blender camera["exposure"]); interpolated during a flight. */
   exposure = 0;
-  private flight: { from: Pose; to: Pose; expFrom: number; expTo: number; t: number; done: () => void } | null = null;
+  private flight: { from: Pose; to: Pose; expFrom: number; expTo: number; t: number; seconds: number; done: () => void } | null = null;
+  mode: RigMode = "orbit";
   constructor(dom: HTMLElement) {
     this.controls = new OrbitControls(this.camera, dom);
     this.controls.enableDamping = true;
-    this.controls.maxDistance = 2500;
+    this.controls.maxDistance = MAX_DISTANCE_M;
     this.controls.minDistance = MIN_DISTANCE_M;
     this.controls.maxPolarAngle = MAX_POLAR;
   }
   get flying() { return this.flight !== null; }
+  /** Look mode (seat view): drag turns the head around a target SEAT_LOOK_M ahead; no pan, no dolly. */
+  setMode(m: RigMode) {
+    this.mode = m;
+    const c = this.controls;
+    c.enablePan = c.enableZoom = m === "orbit";
+    c.minDistance = m === "orbit" ? MIN_DISTANCE_M : 0;
+    c.rotateSpeed = m === "orbit" ? 1 : 0.35;
+    if (m === "look") this.setAutoOrbit(false);
+  }
+  setAutoOrbit(on: boolean) { this.controls.autoRotate = on; this.controls.autoRotateSpeed = AUTO_ORBIT_SPEED; }
+  /** Any drag or wheel on the canvas (OrbitControls "start"). */
+  onUserInput(cb: () => void) { this.controls.addEventListener("start", cb); }
+  zoom(f: number) { return this.flyTo(zoomedPose(this.pose(), f, this.mode), this.exposure, ZOOM_S); }
   pose(): Pose { return { eye: toBlender(this.camera.position), target: toBlender(this.controls.target), hfov: this.hfov }; }
   private apply(p: Pose) {
     this.camera.position.copy(toThree(p.eye));
@@ -70,19 +96,19 @@ export class CameraRig {
    * sphericalDelta/panOffset by `dampingFactor` each call rather than clearing them outright,
    * so a temporary `dampingFactor = 1` consumes the whole remaining delta in one step.
    */
-  flyTo(to: Pose, exposure = this.exposure) {
+  flyTo(to: Pose, exposure = this.exposure, seconds = FLIGHT_S) {
     this.flight?.done();
     const damping = this.controls.dampingFactor;
     this.controls.dampingFactor = 1;
     this.controls.update();
     this.controls.dampingFactor = damping;
-    return new Promise<void>((done) => { this.flight = { from: this.pose(), to, expFrom: this.exposure, expTo: exposure, t: 0, done }; this.controls.enabled = false; });
+    return new Promise<void>((done) => { this.flight = { from: this.pose(), to, expFrom: this.exposure, expTo: exposure, t: 0, seconds, done }; this.controls.enabled = false; });
   }
   jump(p: Pose, exposure = this.exposure) { this.apply(p); this.exposure = exposure; }
   update(dt: number) {
     const f = this.flight;
     if (f) {
-      f.t = Math.min(1, f.t + dt / FLIGHT_S);
+      f.t = Math.min(1, f.t + dt / f.seconds);
       this.apply(poseAt(f.from, f.to, f.t));
       this.exposure = exposureAt(f.expFrom, f.expTo, f.t);
       if (f.t >= 1) { this.flight = null; this.controls.enabled = true; f.done(); }

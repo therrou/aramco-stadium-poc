@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import * as THREE from "three";
 import { BLOOM } from "./lighting";
 import { FLOOD_LENS_MAX, LED_CELL, LED_COVER, LED_GLSL, LED_MAX, LED_R, setupStadiumMaterials } from "./stadium";
-import { splitByGroup, GROUND_ENV, OVERLAY_RE, SAIL_NIGHT_ENV, SAIL_RE, envIntensityOf, sailEnvIntensity, SAIL_COAT, SPEC_OCC, overlayOffset, soMinDefine, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
+import { splitByGroup, GROUND_ENV, OVERLAY_RE, SAIL_NIGHT_ENV, SAIL_RE, envIntensityOf, sailEnvIntensity, SAIL_COAT, SPEC_OCC, SAIL_NIGHT_E, lightsChunkFor, overlayOffset, soMinDefine, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
 
 it("patches three r186 lights_fragment_maps (lightmap blend, no diffuse IBL, env blend)", () => {
   const out = patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps);
@@ -108,6 +108,19 @@ it("A4: flood lens night emission is capped and the lens is single-sided", () =>
 });
 it("A1/A5: the sail skin has its own, higher occlusion floor (the coarse night sail lightmap showed as blocks)", () => {
   expect(SPEC_OCC.sailMin).toBeGreaterThan(SPEC_OCC.min);
-  expect(soMinDefine("sailLeds")).toBe(`#define SO_MIN ${SPEC_OCC.sailMin.toFixed(3)}`);
-  expect(soMinDefine(undefined)).toBe(`#define SO_MIN ${SPEC_OCC.min.toFixed(3)}`);
+  expect(soMinDefine("sailLeds")).toContain(`#define SO_MIN ${SPEC_OCC.sailMin.toFixed(3)}`);
+  expect(soMinDefine(undefined)).toContain(`#define SO_MIN ${SPEC_OCC.min.toFixed(3)}`);
+});
+it("D6: at night the sail skin's lighting blends to the smooth measured level (the night sail bake is noise around 0.2)", () => {
+  const out = patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps);
+  expect(out).toMatch(/#ifdef SAIL_SKIN\s*lightMapIrradiance = mix\( lightMapIrradiance, sailNightIrradiance\( vWorldPosB \), smoothstep\( 0\.6, 1\.0, uNight \) \);/);
+  expect(SAIL_NIGHT_E).toBeCloseTo(0.21, 2);
+  expect(soMinDefine("sailLeds")).toContain("#define SAIL_SKIN");
+  expect(soMinDefine(undefined)).not.toContain("SAIL_SKIN");
+});
+it("D5: the ground's night glow is part of the lights chunk it actually compiles (ordering bug)", () => {
+  const chunk = patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps);
+  expect(lightsChunkFor(chunk, true, false, "ground")).toContain("irradiance += podiumGlow( vWorldPosB ) * uNight;");
+  expect(lightsChunkFor(chunk, true, false, "concrete")).not.toContain("podiumGlow");
+  expect(lightsChunkFor(chunk, false, false, "ground")).toContain("podiumGlow");   // also without lightmaps
 });

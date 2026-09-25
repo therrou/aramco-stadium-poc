@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { MAX_CHARTS, chartUniforms, chartsOfMesh, pitchLinesGlsl, type Chart } from "./pitchLines";
 import { STATE_NIGHT } from "./lightingState";
-import { BICUBIC_GLSL, CONCRETE_GLSL, GRASS_GLSL, NET, NET_GLSL, detailFor } from "./detail";
+import { BICUBIC_GLSL, CONCRETE_GLSL, GRASS_GLSL, GROUND_GLSL, NET, NET_GLSL, detailFor } from "./detail";
 
 const LM_RE = /vec4 lightMapTexel = texture2D\( lightMap, vLightMapUv \);\s*vec3 lightMapIrradiance = lightMapTexel\.rgb \* lightMapIntensity;/;
 const IBL_IRR_RE = /iblIrradiance \+= getIBLIrradiance\( geometryNormal \);/;
@@ -20,7 +20,27 @@ export const SPEC_OCC = { k: { day: 2.0, golden: 1.0, night: 0.5 }, min: 0.1, sa
  * Occlusion floor per material: the sail skin's night lightmap is coarse (1024 px over ~40k m^2) and noisy,
  * and full occlusion printed its texel blocks onto the reflections. Sunlit sails sit above K by day anyway.
  */
-export const soMinDefine = (special: string | undefined) => `#define SO_MIN ${(special === "sailLeds" ? SPEC_OCC.sailMin : SPEC_OCC.min).toFixed(3)}`;
+export const soMinDefine = (special: string | undefined) =>
+  `#define SO_MIN ${(special === "sailLeds" ? SPEC_OCC.sailMin : SPEC_OCC.min).toFixed(3)}\n` + (special === "sailLeds" ? "#define SAIL_SKIN\n" : "");
+
+/**
+ * D6 (v3): the sail skin at night. Its night bake is noise around a flat level: up-facing skin texels have a
+ * median irradiance of 0.20-0.23 from the oculus rim (s 0) to s 0.8 and 0.23-0.29 at the base, with bright
+ * outliers that showed as blocks. At night (blended from golden hour on) the skin takes that smooth level,
+ * with the slight rim and base terms, instead of the texels.
+ */
+export const SAIL_NIGHT_E = 0.21;
+const SAIL_NIGHT_GLSL = /* glsl */ `
+#ifdef SAIL_SKIN
+vec3 sailNightIrradiance( vec3 pB ) {
+  float S = pow( pow( abs( pB.x / 138.0 ), 2.25 ) + pow( abs( pB.y / 121.0 ), 2.25 ), 1.0 / 2.25 );
+  float O = pow( pow( abs( pB.x / 76.0 ), 2.35 ) + pow( abs( pB.y / 63.0 ), 2.35 ), 1.0 / 2.35 );
+  float e = S / max( O, 1e-3 ), s = O <= 1.0 ? 0.0 : clamp( ( S - e ) / max( 1.0 - e, 1e-3 ), 0.0, 1.2 );
+  float E = ${SAIL_NIGHT_E.toFixed(3)} + 0.03 * ( 1.0 - clamp( s / 0.5, 0.0, 1.0 ) ) + 0.07 * smoothstep( 0.85, 1.0, s );
+  return E * vec3( 0.92, 0.96, 1.06 );
+}
+#endif
+`;
 export function specOccK(n: number) {
   const g = STATE_NIGHT.golden;
   return n <= g ? SPEC_OCC.k.day + (SPEC_OCC.k.golden - SPEC_OCC.k.day) * (n / g)
@@ -34,7 +54,10 @@ export function specOccK(n: number) {
 export function patchLightsChunk(chunk: string) {
   for (const re of [LM_RE, IBL_IRR_RE, IBL_RAD_RE, COAT_RAD_RE]) if (!re.test(chunk)) throw new Error(`three.js lights_fragment_maps changed: ${re}`);
   return chunk
-    .replace(LM_RE, `vec3 lightMapIrradiance = mix( rgbmDecode( texBicubic( lightMap, vLightMapUv ) ), rgbmDecode( texBicubic( uLmB, vLightMapUv ) ), uLmBlend ) * lightMapIntensity;`)
+    .replace(LM_RE, `vec3 lightMapIrradiance = mix( rgbmDecode( texBicubic( lightMap, vLightMapUv ) ), rgbmDecode( texBicubic( uLmB, vLightMapUv ) ), uLmBlend ) * lightMapIntensity;
+#ifdef SAIL_SKIN
+	lightMapIrradiance = mix( lightMapIrradiance, sailNightIrradiance( vWorldPosB ), smoothstep( 0.6, 1.0, uNight ) );
+#endif`)
     .replace(IBL_IRR_RE, "")
     .replace(IBL_RAD_RE, `#ifdef USE_LIGHTMAP
 		float lmSo = lmSpecOcc( lightMapIrradiance );
@@ -51,6 +74,7 @@ uniform sampler2D uEnvB; uniform float uEnvBlend; uniform float uNight;
 varying vec3 vWorldPosB;
 vec3 rgbmDecode( vec4 c ) { return c.rgb * c.a * uRgbmRange; }
 ${BICUBIC_GLSL}
+${SAIL_NIGHT_GLSL}
 uniform float uSoK;
 float lmSpecOcc( vec3 e ) { return clamp( dot( e, vec3( 0.2126, 0.7152, 0.0722 ) ) / uSoK, SO_MIN, 1.0 ); }
 #if defined( USE_ENVMAP ) && defined( ENVMAP_TYPE_CUBE_UV )
@@ -167,12 +191,21 @@ export const FLOOD_LENS_MAX = 30;
 
 /** Spec v3 part 2: the detail shaders (detail.ts) and what each does after the albedo map. */
 const FLAT_NORMAL_B = "vec3 nB = normalize( cross( dFdx( vWorldPosB ), dFdy( vWorldPosB ) ) );\n";
-const DETAIL_GLSL = { grass: GRASS_GLSL, net: NET_GLSL, concrete: CONCRETE_GLSL } as const;
+const DETAIL_GLSL = { grass: GRASS_GLSL, net: NET_GLSL, concrete: CONCRETE_GLSL, ground: GROUND_GLSL } as const;
+/** Light added after the lightmap (D5: the podium's night glow on the plaza). */
+const DETAIL_LIGHT: Partial<Record<keyof typeof DETAIL_GLSL, string>> = { ground: "irradiance += podiumGlow( vWorldPosB ) * uNight;" };
 const DETAIL_MAP = {
   grass: "diffuseColor.rgb = grassAlbedo( vWorldPosB );",
   net: FLAT_NORMAL_B + `diffuseColor.rgb = vec3( ${NET.color.toFixed(2)} ); diffuseColor.a = netCoverage( netPlane( vWorldPosB, nB ) );`,
   concrete: FLAT_NORMAL_B + "diffuseColor.rgb *= concreteDetail( vWorldPosB, nB );",
+  ground: "diffuseColor.rgb *= groundDetail( vWorldPosB );",
 } as const;
+
+/** The lights chunk a stadium material compiles: patched or stock, the pitch lines' UVs, then any detail light. */
+export function lightsChunkFor(chunk: string, useLightmaps: boolean, lines: boolean, detail: keyof typeof DETAIL_GLSL | undefined) {
+  const base = useLightmaps ? (lines ? pitchLinesChunk(chunk) : chunk) : THREE.ShaderChunk.lights_fragment_maps;
+  return base + (detail && DETAIL_LIGHT[detail] ? "\n" + DETAIL_LIGHT[detail] : "");
+}
 
 /** Final review 4: flat pitch lines take their lightmap UV from the grass charts (see pitchLines.ts). */
 export const PITCH_LINES_RE = /^M_LineWhite\b/;
@@ -257,10 +290,10 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
       s.fragmentShader = s.fragmentShader
         .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + soMinDefine(ex.special) + PARS + (ex.special === "sailLeds" ? LED_GLSL : "")
           + (lines ? pitchLinesGlsl(lineCharts!.length) : ""))
-        .replace("#include <lights_fragment_maps>", useLightmaps ? (lines ? pitchLinesChunk(chunk) : chunk) : THREE.ShaderChunk.lights_fragment_maps);
+        .replace("#include <lights_fragment_maps>", lightsChunkFor(chunk, useLightmaps, lines, detail));
       if (detail) s.fragmentShader = s.fragmentShader
         .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + DETAIL_GLSL[detail])
-        .replace("#include <map_fragment>", "#include <map_fragment>\n" + DETAIL_MAP[detail]);
+        .replace("#include <map_fragment>", "#include <map_fragment>\n" + DETAIL_MAP[detail])
       if (ex.special === "sailLeds")
         s.fragmentShader = s.fragmentShader.replace("#include <emissivemap_fragment>",
           "#include <emissivemap_fragment>\ntotalEmissiveRadiance = min( totalEmissiveRadiance * sailLeds( vWorldPosB ), vec3( " + LED_MAX.toFixed(2) + " ) );");

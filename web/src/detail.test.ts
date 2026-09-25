@@ -48,3 +48,18 @@ describe("material detail routing", () => {
     expect(CONCRETE_GLSL).toContain("vec3 concreteDetail( vec3 pB, vec3 nB )");
   });
 });
+
+import { GROUND_GLSL, PODIUM_GLOW, podiumGlow } from "./detail";
+describe("D5 ground detail and the podium's night glow", () => {
+  it("routes the site's ground materials", () => {
+    for (const m of ["M_Lawn.web", "M_Sand.web", "M_Paving.web", "M_Plaza.web", "M_Asphalt.web"]) expect(detailFor(m)).toBe("ground");
+    expect(GROUND_GLSL).toContain("vec3 groundDetail( vec3 pB )");
+    expect(GROUND_GLSL).toContain("vec3 podiumGlow( vec3 pB )");
+  });
+  it("the glow is strongest at the podium edge, fades outward, and is off inside the shell", () => {
+    expect(podiumGlow(0.5)).toBe(0);                       // inside the shell outline
+    expect(podiumGlow(1.0)).toBeCloseTo(PODIUM_GLOW.e, 6);
+    expect(podiumGlow(1.2)).toBeLessThan(podiumGlow(1.05));
+    expect(podiumGlow(3)).toBeLessThan(0.01 * PODIUM_GLOW.e);
+  });
+});

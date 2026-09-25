@@ -107,8 +107,36 @@ vec3 concreteDetail( vec3 pB, vec3 nB ) {
 }
 `;
 
-export type Detail = "grass" | "net" | "concrete";
+/**
+ * D5: the site's ground (lawn, sand, paving, plaza, asphalt). The far-site lightmap is ~6.5 m per texel,
+ * so world-space mottling at ~12 m and ~2 m plus a fine grain break up its smooth blocks (albedo modulation
+ * around 1). At night the lit concourse glass (M_ConcourseGlass, emission 2.5 x n) lights the plaza around the
+ * podium; the night bake left it dark where Cycles shows it bright, so that spill is added: irradiance
+ * PODIUM_GLOW.e at the shell's outline, fading with an e-fold of PODIUM_GLOW.decay metres outward.
+ */
+export const PODIUM_GLOW = { e: 1.4, decay: 40, color: [1.0, 0.86, 0.66] } as const;
+/** Metres outside the shell outline per unit of shell superellipse radius (SHELL_A/B ~ 138/121 m). */
+const OUTLINE_M = 130;
+export const podiumGlow = (shellRadius: number) =>
+  shellRadius < 1 ? 0 : PODIUM_GLOW.e * Math.exp(-((shellRadius - 1) * OUTLINE_M) / PODIUM_GLOW.decay);
+export const GROUND_GLSL = NOISE_GLSL + /* glsl */ `
+vec3 groundDetail( vec3 pB ) {
+  float px = max( length( fwidth( pB ) ), 1e-4 );
+  vec3 p = vec3( pB.xy, 0.0 );
+  float m = dFbm( p, 0.08, 3, px ) * 0.6 + dFbm( p, 0.5, 4, px ) * 0.4;
+  float grain = mix( 0.5, dNoise( p * 45.0 ), 1.0 - smoothstep( 0.006, 0.02, px ) );
+  return vec3( 0.8 + 0.4 * m ) * ( 0.94 + 0.12 * grain );
+}
+vec3 podiumGlow( vec3 pB ) {
+  float S = pow( pow( abs( pB.x / 138.0 ), 2.25 ) + pow( abs( pB.y / 121.0 ), 2.25 ), 1.0 / 2.25 );
+  float g = S < 1.0 ? 0.0 : ${PODIUM_GLOW.e.toFixed(3)} * exp( -( S - 1.0 ) * ${OUTLINE_M.toFixed(1)} / ${PODIUM_GLOW.decay.toFixed(1)} );
+  return g * vec3( ${PODIUM_GLOW.color.map((v) => v.toFixed(2)).join(", ")} );
+}
+`;
+
+export type Detail = "grass" | "net" | "concrete" | "ground";
 const ROUTES: [RegExp, Detail][] = [
+  [/^M_(Lawn|Sand|Paving|Plaza|Asphalt)\b/, "ground"],
   [/^M_Grass\b/, "grass"],
   [/^M_Net\b/, "net"],
   [/^M_(Concrete|ConcreteRiser|StepNosing|Soffit)\b/, "concrete"],

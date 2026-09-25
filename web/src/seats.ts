@@ -18,6 +18,26 @@ export function seatGeometry() {
   return g;
 }
 
+/** Selected-seat highlight opacity, 1.2 s period. */
+export const pulse = (t: number) => 0.625 + 0.275 * Math.sin((t * 2 * Math.PI) / 1.2);
+
+/** A slightly larger white seat drawn over the selected one, pulsing (spec part 2). */
+export class SeatHighlight {
+  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+  private scale = new THREE.Matrix4().makeScale(1.08, 1.08, 1.08);
+  constructor() {
+    this.mesh = new THREE.Mesh(seatGeometry(), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false }));
+    this.mesh.matrixAutoUpdate = false;
+    this.mesh.visible = false;
+    this.mesh.renderOrder = 1;
+  }
+  set(m: THREE.Matrix4 | null) {
+    this.mesh.visible = m !== null;
+    if (m) { this.mesh.matrix.copy(m).multiply(this.scale); this.mesh.matrixWorldNeedsUpdate = true; }
+  }
+  update(t: number) { this.mesh.material.opacity = pulse(t); }
+}
+
 /** Sections whose centroid is within `dist` of the camera (Blender coords). `always` stays visible. */
 export function visibleSections(camB: V3, sections: Section[], dist: number, always = -1) {
   const out = new Set<number>();
@@ -53,6 +73,8 @@ export class SeatField {
     this.colors = (this.mesh.instanceColor!.array as Float32Array).slice();
     this.setVisibleSections(new Set());
   }
+  /** Instance matrix of seat index i (seats.bin order). */
+  matrixOf(i: number, out = new THREE.Matrix4()) { return out.fromArray(this.matrices, i * 16); }
   /**
    * Packs the visible sections' seats at the front of the instance buffers and draws only those
    * (`mesh.count`), so hidden seats cost nothing (Task 13: previously zero matrices, which still

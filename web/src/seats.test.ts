@@ -23,3 +23,14 @@ describe("seats", () => {
     expect(visibleSections([-330, -470, 230], doc.sections, SEAT_LOD_DIST).size).toBe(0);
   });
 });
+
+import { pulse, SeatHighlight } from "./seats";
+import * as THREE from "three";
+it("selected seat highlight pulses between 0.35 and 0.9 and hides with no seat", () => {
+  for (let t = 0; t < 3; t += 0.1) { expect(pulse(t)).toBeGreaterThanOrEqual(0.35); expect(pulse(t)).toBeLessThanOrEqual(0.9); }
+  const h = new SeatHighlight();
+  h.set(null);
+  expect(h.mesh.visible).toBe(false);
+  h.set(new THREE.Matrix4());
+  expect(h.mesh.visible).toBe(true);
+});

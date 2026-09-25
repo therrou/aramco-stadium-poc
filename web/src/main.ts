@@ -2,27 +2,32 @@ import * as THREE from "three";
 import { missingCapabilities, probe } from "./capabilities";
 import { AssetError, assetJobs, collect, fetchManifest, makeLoaders, runJobs, type Assets } from "./loader";
 import { Perf, exposeViewerHooks } from "./perf";
-import { hideOverlay, showError, showFatal, showProgress, renderPanel } from "./ui";
+import { hideOverlay, showError, showFatal, showProgress } from "./ui";
 import { toBlender, type V3 } from "./coords";
 import { imageStats, type Box } from "./frameStats";
-import { parseSeats, indexSections } from "./seatsData";
+import { parseSeats, indexSections, SeatDirectory, parseSeatParam, formatSeat, type SeatRef } from "./seatsData";
 import type { Tier } from "./tiers";
-import { SeatField, visibleSections, SEAT_LOD_DIST } from "./seats";
+import { SeatField, SeatHighlight, visibleSections, SEAT_LOD_DIST } from "./seats";
 import { SectionPatches } from "./sectionPatches";
-import { CameraRig } from "./camera";
-import { cameraPose, sectionFraming, type Pose } from "./flyto";
+import { CameraRig, ZOOM_S } from "./camera";
+import { cameraPose, seatViewPose, SEAT_EXP, type Pose } from "./flyto";
+import { nearestSeatToRay } from "./seatPick";
 import { DepthProbe, acceptPatchHit, onClick } from "./picking";
-import { reduce, initialState, parseLighting, type Action } from "./state";
+import { reduce, initialState, parseLighting, type Action, type AppState } from "./state";
 import { STATES, type State } from "./loader";
 import { setupStadiumMaterials, specOccK, type SharedUniforms } from "./stadium";
 import { Lighting, makeComposer } from "./lighting";
 import { missingLightmaps } from "./lightingState";
 import { setupTrees } from "./trees";
+import { heroesIn } from "./heroViews";
+import { renderHeader } from "./ui/header";
+import { Sidebar } from "./ui/sidebar";
+import { Controls } from "./ui/controls";
+import { Tooltip } from "./ui/tooltip";
 
 const params = new URLSearchParams(location.search);
-/** Camera exposure (stops) in the section view: the CAM_Seat_* cameras' value. */
-const SECTION_EXP = 0.1;
-
+/** Hover picking interval (ms): ~20 Hz, each pick may draw one depth-probe pixel. */
+const HOVER_MS = 50;
 async function boot() {
   const missing = missingCapabilities(probe());
   if (missing.length) return showFatal(`Missing: ${missing.join(", ")}.`);
@@ -59,9 +64,11 @@ async function boot() {
 }
 
 function start(renderer: THREE.WebGLRenderer, a: Assets) {
+  if (params.get("chrome") === "0") document.body.classList.add("bare");
   const scene = new THREE.Scene();
   scene.add(a.stadium.scene);
-  const table = parseSeats(a.seatsBin), idx = indexSections(table);
+  const table = parseSeats(a.seatsBin), idx = indexSections(table), dir = new SeatDirectory(table, idx);
+  const stage = document.getElementById("stage")!;
   const rig = new CameraRig(renderer.domElement);
   const overview = cameraPose(a.cameras["CAM_Aerial_SW"]);
   // final review 2: exposure follows each flight; back at the overview it is CAM_Aerial_SW's, not ?cam's
@@ -89,23 +96,128 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const seats = new SeatField(table, idx, a.sections.sections, lighting.outdoor);
   const tierOf = new Map(a.sections.sections.map((s) => [Number(s.id), s.tier as Tier]));
   const patches = new SectionPatches(table, idx, lighting.outdoor, (id) => tierOf.get(id));
-  scene.add(seats.mesh, patches.mesh);
+  const highlight = new SeatHighlight();
+  scene.add(seats.mesh, patches.mesh, highlight.mesh);
   if (a.trees) { setupTrees(a.trees, a.impostors, lighting.outdoor); scene.add(a.trees.scene); }
   const composer = makeComposer(renderer, scene, camera);
   const perf = new Perf(params.has("stats"));
+  // Review Focus 5: size to the stage (the sidebar or bottom sheet takes the rest), not to the window
   const resize = () => {
-    const [w, h] = (params.get("size") ?? `${innerWidth}x${innerHeight}`).split("x").map(Number);
+    const [w, h] = (params.get("size") ?? `${stage.clientWidth}x${stage.clientHeight}`).split("x").map(Number);
+    if (!(w > 0 && h > 0)) return;
     renderer.setSize(w, h, false);
     rig.resize(w, h);
     composer.setSize(w, h);
   };
-  addEventListener("resize", resize);
+  new ResizeObserver(resize).observe(stage);
   resize();
   renderer.info.autoReset = false;
+
+  let app: AppState = { ...initialState, lighting: startState };
+  const seatPose = (r: SeatRef) => seatViewPose(dir.position(dir.find(r)));
+  const syncUrl = () => {
+    const u = new URL(location.href);
+    if (app.view.kind === "seat") u.searchParams.set("seat", formatSeat(app.view.seat)); else u.searchParams.delete("seat");
+    history.replaceState(null, "", u);
+  };
+  const enterSeat = (r: SeatRef, fly: boolean) => {
+    rig.setMode("look");
+    if (fly) rig.flyTo(seatPose(r), SEAT_EXP); else rig.jump(seatPose(r), SEAT_EXP);
+    highlight.set(seats.matrixOf(dir.find(r)));
+  };
+  const dispatch = (act: Action) => {
+    const prev = app;
+    app = reduce(app, act);
+    if (app === prev) return;
+    if (act.type === "seat" && app.view.kind === "seat") { controls.clearCamera(); enterSeat(app.view.seat, true); }
+    if (act.type === "back" || act.type === "camera") {
+      rig.setMode("orbit");
+      highlight.set(null);
+      const c = act.type === "camera" ? a.cameras[act.camera] : undefined;
+      if (act.type === "back") controls.clearCamera();
+      rig.flyTo(c ? cameraPose(c) : overview, c?.exposure ?? overviewExp);
+    }
+    if (act.type === "lighting") lighting.request(app.lighting);
+    rig.setAutoOrbit(app.autoOrbit);
+    syncUrl();
+    draw();
+  };
+
+  renderHeader(document.getElementById("header")!, a.sections.seats_total);
+  const sidebar = new Sidebar(document.getElementById("sidebar")!, dir, a.sections.sections, {
+    seeView: (r) => dispatch({ type: "seat", seat: r }),
+    hero: (cam) => dispatch({ type: "camera", camera: cam }),
+    back: () => dispatch({ type: "back" }),
+    copyLink: () => { navigator.clipboard?.writeText(location.href).then(() => sidebar.linkCopied(), () => {}); },
+  }, heroesIn(a.cameras));
+  const controls = new Controls(document.getElementById("controls")!, {
+    lighting: (l) => dispatch({ type: "lighting", lighting: l }),
+    zoom: (f) => { if (app.autoOrbit) dispatch({ type: "autoOrbit", on: false }); rig.zoom(f); },
+    reset: () => (app.view.kind === "seat" ? rig.flyTo(seatPose(app.view.seat), SEAT_EXP, ZOOM_S * 2) : rig.flyTo(overview, overviewExp)),
+    fullscreen: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()),
+    camera: (cam) => dispatch({ type: "camera", camera: cam }),
+    autoOrbit: (on) => dispatch({ type: "autoOrbit", on }),
+  });
+  const draw = () => { sidebar.render(app); controls.render(app); };
+  rig.onUserInput(() => { if (app.autoOrbit) dispatch({ type: "autoOrbit", on: false }); });
+
+  // picking: section strips (always raycastable, even where seats are drawn), wall check, nearest seat to the ray
+  const ray = new THREE.Raycaster(), probe = new DepthProbe(renderer);
+  const pickSeat = (ndc: THREE.Vector2): number => {
+    ray.setFromCamera(ndc, rig.camera);
+    const hit = ray.intersectObject(patches.mesh, false)[0];
+    if (!hit) return -1;
+    if (!acceptPatchHit(hit.distance, probe.distance(a.stadium.scene, rig.camera, ndc))) return -1;   // final review 6
+    const r = idx.get(patches.sectionOfFace(hit.faceIndex!));
+    return r ? nearestSeatToRay(table, r, toBlender(ray.ray.origin), toBlender(ray.ray.direction)) : -1;
+  };
+  const tooltip = new Tooltip(document.getElementById("tooltip")!);
+  const dom = renderer.domElement;
+  const toNdc = (e: PointerEvent) => {
+    const r = dom.getBoundingClientRect();
+    return { ndc: new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  let hover: ReturnType<typeof toNdc> | null = null, lastHover = 0, dragging = false;
+  dom.addEventListener("pointermove", (e) => { hover = e.pointerType === "mouse" ? toNdc(e) : null; });
+  dom.addEventListener("pointerdown", () => { dragging = true; hover = null; tooltip.hide(); });
+  addEventListener("pointerup", () => (dragging = false));
+  dom.addEventListener("pointerleave", () => { hover = null; tooltip.hide(); });
+  onClick(dom, (ndc) => {
+    const i = pickSeat(ndc);
+    if (i >= 0) { tooltip.hide(); dispatch({ type: "seat", seat: dir.ref(i) }); }
+  });
+  addEventListener("keydown", (e) => e.key === "Escape" && dispatch({ type: "back" }));
+
+  // deep link (Review Focus 1): only a real seat opens seat view; anything else is the overview
+  const linked = parseSeatParam(params.get("seat"));
+  if (linked && dir.find(linked) >= 0) { app = reduce(app, { type: "seat", seat: linked }); enterSeat(linked, false); }
+  else if (params.has("seat")) syncUrl();
+  draw();
+
+  const frame = (dt: number) => {
+    rig.update(dt);
+    const now = performance.now();
+    if (rig.flying) tooltip.hide();
+    else if (hover && !dragging && now - lastHover >= HOVER_MS) {
+      lastHover = now;
+      const h = hover, i = pickSeat(h.ndc);
+      if (i >= 0) tooltip.show(h.x, h.y, dir.ref(i), tierOf.get(table.section[i]) ?? "Lower"); else tooltip.hide();
+      hover = null;                                                          // re-pick only after the pointer moves again
+    }
+    const focus = app.view.kind === "seat" ? app.view.seat.section : -1;
+    const vis = visibleSections(toBlender(camera.position), a.sections.sections, SEAT_LOD_DIST, focus);
+    seats.setVisibleSections(vis);
+    patches.setHidden(vis);
+    highlight.update(now / 1000);
+    lighting.update(dt, rig.exposure, camera);
+    composer.render(dt);
+  };
+
   exposeViewerHooks({ get fps() { return perf.fps; }, info: renderer.info, scene, flyTo: (p: Pose) => rig.flyTo(p),
     setState: (s: State) => dispatch({ type: "lighting", lighting: s }),
     get night() { return lighting.t.night; }, tick: (dt = 1 / 60) => frame(dt),
     renderer, composer, camera, rig, lighting, stadium: a.stadium.scene, assets: a,
+    get app() { return app; }, dispatch, pickSeat,
     /** v2 Task 1: metrics of the next rendered frame (drawing buffer is read in the same task as the render). */
     stats: (box?: Box) => {
       frame(0);
@@ -125,50 +237,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
       rig.jump({ eye: p.eye.map((v, k) => v + off[k]) as V3, target: p.target.map((v, k) => v + off[k]) as V3, hfov: p.hfov });
     } });
 
-  let app = { ...initialState, lighting: startState };
-  const lightingChanged = (l: State) => lighting.request(l);
-  const secById = new Map(a.sections.sections.map((s) => [Number(s.id), s]));
-  const ray = new THREE.Raycaster(), probe = new DepthProbe(renderer);
-  const dispatch = (act: Action) => {
-    const prev = app;
-    app = reduce(app, act);
-    if (app === prev) return;
-    if (act.type === "section" && app.view.kind === "section") rig.flyTo(sectionFraming(secById.get(app.view.section)!), SECTION_EXP);
-    if (act.type === "back") rig.flyTo(overview, overviewExp);
-    if (act.type === "lighting") lightingChanged(app.lighting);
-    draw();
-  };
-  const draw = () => {
-    const v = app.view, sec = v.kind === "section" ? secById.get(v.section) : undefined;
-    let available = 0, total = 0;
-    if (v.kind === "section") {
-      const { start, end } = idx.get(v.section)!;
-      total = end - start;
-      available = total;   // v2: no mock availability (panel replaced in Task 14)
-    }
-    renderPanel(app, { sectionLabel: sec?.id, tier: sec?.tier, available, total }, {
-      lighting: (l) => dispatch({ type: "lighting", lighting: l }),
-      back: () => dispatch({ type: "back" }),
-    });
-  };
-  onClick(renderer.domElement, (ndc) => {
-    ray.setFromCamera(ndc, rig.camera);
-    const hit = ray.intersectObject(patches.mesh, false)[0];
-    const wall = hit ? probe.distance(a.stadium.scene, rig.camera, ndc) : undefined;   // final review 6
-    dispatch(hit && acceptPatchHit(hit.distance, wall) ? { type: "section", section: patches.sectionOfFace(hit.faceIndex!) } : { type: "none" });
-  });
-  addEventListener("keydown", (e) => e.key === "Escape" && dispatch({ type: "back" }));
-  draw();
-
   const clock = new THREE.Clock();
-  const frame = (dt: number) => {
-    rig.update(dt);
-    const vis = visibleSections(toBlender(camera.position), a.sections.sections, SEAT_LOD_DIST, app.view.kind === "section" ? app.view.section : -1);
-    seats.setVisibleSections(vis);
-    patches.setHidden(vis);
-    lighting.update(dt, rig.exposure, camera);
-    composer.render(dt);
-  };
   renderer.setAnimationLoop(() => {
     perf.begin();
     renderer.info.reset();

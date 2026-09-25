@@ -109,6 +109,32 @@ D6. **Sails without lightmap.** The sail skin is an unoccluded exterior shell:
 
 The underside (M_SailUnder) keeps its bake.
 
+D7. **Seats** (added 2026-09-25 after user review). The seat is a moulded shell with a curved pan, a back and a
+  front lip:
+  - about 150 triangles near the camera, and the 24-triangle block beyond about 40 m (two instanced LODs picked
+    per section by distance);
+  - a plastic material with roughness about 0.45 and a faint clear coat, so seats catch the light;
+  - the current seat colours and tints, kept;
+  - a soft contact shadow under each seat from the lightmap and a per-row darkening term.
+
+  Draw calls stay within budget (2 instanced meshes).
+
+D8. **Stands concrete and stairs.** Tiling detail (a concrete albedo, a normal map, and a nosing strip on aisle
+  steps, with procedural edge wear) is applied in world space by triplanar mapping. The bowl lightmap supplies only
+  light, sampled bicubic (D3) after the denoise (D4). The aisle steps get a contrasting nosing colour, as in the
+  renders.
+
+D9. **Vegetation.**
+  - Raise the near tree LOD texture caps (512 → 1024 for base colour) as far as the budget allows.
+  - Alpha-to-coverage on the leaves, so foliage edges are anti-aliased instead of hard alpha-test.
+  - A wind sway in the vertex shader (small, optional).
+  - Impostors: 8 → 16 frames per species, cross-faded.
+  - The lawn and shrub beds get the D5 tiling detail.
+
+D10. **Asset budget.** D2 and D5-D9 add about 4-8 MB of textures. If the total goes over 35 MB, reclaim space in
+  this order: move the lightmaps to half-float-free RGBM at lower UASTC quality, then trim the tree textures, then
+  ask the user about raising the budget.
+
 ## Part 3: real-time sun shadows (last, gated by fps)
 
 S1. Use a directional sun with cascaded shadow maps (three `CSM` addon or 2-3 manual cascades) for day and
@@ -123,7 +149,7 @@ drop it, and D1-D6 stand alone.
 - Camera: every flight in the UI (seat ↔ overview, hero ↔ hero, mode bar) is checked in a visible tab with a
   frame strip in the report: no pass through geometry, no snap, speed continuous. Limits are enforced.
 - Visual: the 9 cam/state side-by-sides against Cycles, plus close-ups (pitch from a lower seat, goal,
-  sails, site from the exterior). The pitch, goals and sails show no visible texel blocks or chart seams at
+  sails, site from the exterior, seats and aisle stairs from a seat, trees near the plaza). The pitch, goals and sails show no visible texel blocks or chart seams at
   1080p. The day means stay within ±15 %.
 - Performance and the budget as in v1/v2.
 

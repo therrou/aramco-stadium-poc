@@ -17,3 +17,4 @@ __pycache__/
 .venv/
 web/public/basis/
 .superpowers/
+web/public/fonts/AktivGrotesk_*

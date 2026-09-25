@@ -1,21 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { CameraRig, LOOK_HFOV, MAX_POLAR, MIN_DISTANCE_M, exposureAt, polarLimit, poseAt, zoomedPose } from "./camera";
+import { CameraRig, LOOK_HFOV, MAX_POLAR, MIN_DISTANCE_M, MAX_DISTANCE_M, TARGET_DISC_M, clampOrbit, pivotOf, exposureAt, polarLimit, zoomedPose } from "./camera";
+import { planFlight } from "./route";
 import type { Pose } from "./flyto";
 
 const A: Pose = { eye: [0, -20, 35], target: [0, 0, 0], hfov: 50 };
 const B: Pose = { eye: [10, -50, 8], target: [2, -11, 0], hfov: 55 };
 const C: Pose = { eye: [-40, 20, 30], target: [0, 0, 0], hfov: 50 };
 
-it("poseAt hits both ends and eases", () => {
-  expect(poseAt(A, B, 0)).toEqual(A);
-  expect(poseAt(A, B, 1)).toEqual(B);
-  expect(poseAt(A, B, 0.1).eye[0]).toBeLessThan(1);          // slow start
-});
-
 it("re-targeting mid-flight starts from the current in-between pose (Review Focus 2)", () => {
-  const mid = poseAt(A, B, 0.4);
-  expect(poseAt(mid, C, 0)).toEqual(mid);
-  expect(poseAt(mid, C, 0.01).eye[0]).toBeCloseTo(mid.eye[0], 0);
+  const mid = planFlight(A, B).at(0.4);
+  expect(planFlight(mid, C).at(0)).toEqual(mid);
 });
 
 /**
@@ -61,8 +55,9 @@ describe("CameraRig vs. OrbitControls damping momentum (fix round 1)", () => {
     // inject a bogus damping delta mid-flight, as if a stray pointer/inertia event fired;
     // if update() called controls.update() while flying this would bend the path
     (rig.controls as any)._sphericalDelta.theta = 1;
-    rig.update(0.75); // FLIGHT_S = 1.5s, so this lands at t = 0.5
-    const expected = poseAt(A, B, 0.5);
+    const plan = planFlight(A, B);
+    rig.update(plan.seconds / 2);
+    const expected = plan.at(0.5);
     const p = rig.pose();
     expect(p.eye[0]).toBeCloseTo(expected.eye[0], 6);
     expect(p.eye[1]).toBeCloseTo(expected.eye[1], 6);
@@ -87,7 +82,7 @@ describe("CameraRig vs. OrbitControls damping momentum (fix round 1)", () => {
   });
 });
 
-const FLIGHT_S_TEST = 2; // > FLIGHT_S (1.5s), forces t to clamp to 1 in a single update()
+const FLIGHT_S_TEST = 4; // > FLIGHT_MAX_S (3.2 s), forces t to clamp to 1 in a single update()
 
 describe("camera exposure follows the flight (final review 2)", () => {
   it("exposureAt eases between the ends like the pose", () => {
@@ -102,9 +97,9 @@ describe("camera exposure follows the flight (final review 2)", () => {
     const rig = new CameraRig(stubDom());
     rig.jump(A, -0.4);
     rig.flyTo(B, 0.1);
-    rig.update(0.75);
+    rig.update(planFlight(A, B).seconds / 2);
     expect(rig.exposure).toBeCloseTo(exposureAt(-0.4, 0.1, 0.5), 10);
-    rig.update(1);
+    rig.update(FLIGHT_S_TEST);
     expect(rig.exposure).toBe(0.1);
     rig.flyTo(A, -0.4);
     rig.update(FLIGHT_S_TEST);
@@ -192,5 +187,43 @@ describe("final review fixes", () => {
     rig.setMode("orbit");
     rig.jump(far);
     expect(rig.controls.maxPolarAngle).toBeCloseTo(MAX_POLAR, 6);
+  });
+});
+
+describe("orbit limits (spec v3 C5)", () => {
+  it("zoom-out stops at MAX_DISTANCE_M (900 m)", () => {
+    expect(MAX_DISTANCE_M).toBe(900);
+    const p = { eye: [0, -800, 400] as [number, number, number], target: [0, 0, 0] as [number, number, number], hfov: 50 };
+    expect(Math.hypot(...zoomedPose(p, 10, "orbit").eye)).toBeCloseTo(MAX_DISTANCE_M, 6);
+  });
+  it("the orbit target stays on a disc around the stadium and the eye moves with it", () => {
+    const r = clampOrbit([900, 0, 300], [700, 0, 100]);
+    expect(Math.hypot(r.target[0], r.target[1])).toBeCloseTo(TARGET_DISC_M, 6);
+    expect(r.target[2]).toBe(60);
+    expect(r.eye.map((v, k) => v - r.target[k])).toEqual([200, 0, 200]);
+  });
+  it("the eye stays above the ground (3 m outside the shell, 2 m inside)", () => {
+    expect(clampOrbit([400, 0, -5], [100, 0, 0]).eye[2]).toBe(3);
+    expect(clampOrbit([0, -30, 0.5], [0, 0, 0]).eye[2]).toBe(2);
+    const p = pivotOf({ eye: [-330, -470, 230], target: [-276.7634, -392.5649, 195.7995], hfov: 46 });
+    expect(clampOrbit(p.eye, p.target)).toEqual({ eye: p.eye, target: p.target });   // the overview is inside the limits
+  });
+});
+
+describe("orbit pivot of a Blender camera pose", () => {
+  const dir = (p: { eye: number[]; target: number[] }) => { const d = p.target.map((v, k) => v - p.eye[k]), n = Math.hypot(...d); return d.map((v) => v / n); };
+  it("keeps the view and moves the target to where the view meets the ground near the stadium", () => {
+    const cam = { eye: [-330, -470, 230] as [number, number, number], target: [-276.7634, -392.5649, 195.7995] as [number, number, number], hfov: 46 };
+    const p = pivotOf(cam);
+    expect(p.eye).toEqual(cam.eye);
+    dir(p).forEach((v, k) => expect(v).toBeCloseTo(dir(cam)[k], 9));
+    expect(p.target[2]).toBeCloseTo(0, 6);
+    expect(Math.hypot(p.target[0], p.target[1])).toBeLessThan(TARGET_DISC_M);
+  });
+  it("a camera looking up (CAM_Pitch) pivots on its view ray near the stadium axis", () => {
+    const cam = { eye: [0, -30, 1.7] as [number, number, number], target: [0, 67.5494, 23.7028] as [number, number, number], hfov: 90 };
+    const p = pivotOf(cam);
+    dir(p).forEach((v, k) => expect(v).toBeCloseTo(dir(cam)[k], 9));
+    expect(Math.hypot(...p.target.map((v, k) => v - cam.eye[k]))).toBeGreaterThanOrEqual(MIN_DISTANCE_M);
   });
 });

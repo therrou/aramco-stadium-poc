@@ -1,19 +1,11 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { toBlender, toThree, type V3 } from "./coords";
-import { easeInOutCubic, pathPoint, verticalFov, type Pose } from "./flyto";
+import { easeInOutCubic, verticalFov, type Pose } from "./flyto";
+import { plan, planFlight, type Flight } from "./route";
 
-export const FLIGHT_S = 1.5;
 /** Near plane (Task 13b): 0.1 -> 0.5 m. The closest views (section seats) keep geometry >= ~1 m away. */
 export const NEAR_M = 0.5;
-const lerp3 = (a: V3, b: V3, t: number) => a.map((v, k) => v + (b[k] - v) * t) as V3;
-
-export function poseAt(from: Pose, to: Pose, t: number): Pose {
-  if (t <= 0) return from;
-  if (t >= 1) return to;
-  const e = easeInOutCubic(t);
-  return { eye: pathPoint(from.eye, to.eye, e), target: lerp3(from.target, to.target, e), hfov: from.hfov + (to.hfov - from.hfov) * e };
-}
 
 /**
  * Final review 2: camera exposure (stops) follows the flight with the same eased progress as the pose,
@@ -31,7 +23,7 @@ export function exposureAt(from: number, to: number, t: number) {
  * on one relaxes the limit to that pose, else OrbitControls would snap it the first frame after landing.
  */
 export const MAX_POLAR = (85 * Math.PI) / 180;
-export const MIN_DISTANCE_M = 5;
+export const MIN_DISTANCE_M = 15;
 export function polarLimit(p: Pose) {
   const d = p.eye.map((v, k) => v - p.target[k]), r = Math.hypot(...d);
   return r > 0 ? Math.max(MAX_POLAR, Math.acos(Math.min(1, Math.max(-1, d[2] / r))) + 1e-3) : MAX_POLAR;
@@ -42,7 +34,16 @@ export type RigMode = "orbit" | "look";
 export const LOOK_HFOV = [25, 90] as const;
 /** Seat view may look up at the roof and sails (orbit keeps MAX_POLAR, 5 deg above the horizon). */
 export const LOOK_MAX_POLAR = (165 * Math.PI) / 180;
-export const ZOOM_S = 0.35, AUTO_ORBIT_SPEED = 0.6, MAX_DISTANCE_M = 2500;
+export const ZOOM_S = 0.35, AUTO_ORBIT_SPEED = 0.6;
+/** Spec v3 C5: orbit distance 15-900 m, target on a 320 m disc at z 0-60, eye above the ground. */
+export const MAX_DISTANCE_M = 900, TARGET_DISC_M = 320;
+export function clampOrbit(eye: V3, target: V3) {
+  const r = Math.hypot(target[0], target[1]), k = r > TARGET_DISC_M ? TARGET_DISC_M / r : 1;
+  const t: V3 = [target[0] * k, target[1] * k, Math.min(60, Math.max(0, target[2]))];
+  const e: V3 = [eye[0] + t[0] - target[0], eye[1] + t[1] - target[1], eye[2] + t[2] - target[2]];
+  e[2] = Math.max(e[2], plan(e).S < 1 ? 2 : 3);
+  return { eye: e, target: t };
+}
 /** Zoom buttons: orbit dollies toward the target; look (seat view) changes the fov so the eye stays in the seat. */
 export function zoomedPose(p: Pose, f: number, mode: RigMode): Pose {
   if (mode === "look") return { ...p, hfov: Math.min(LOOK_HFOV[1], Math.max(LOOK_HFOV[0], p.hfov * f)) };
@@ -51,13 +52,28 @@ export function zoomedPose(p: Pose, f: number, mode: RigMode): Pose {
   return { ...p, eye: p.target.map((v, i) => v + d[i] * k) as V3 };
 }
 
+/**
+ * Blender camera poses aim at a point 100 m ahead of the lens, which is no orbit pivot (for the overview it
+ * lies 480 m from the stadium). Keep the view, and put the target where the view ray meets the ground,
+ * or else at the ray's closest approach to the stadium's axis (cameras looking up), at least 15 m ahead.
+ */
+export function pivotOf(p: Pose): Pose {
+  const d = p.target.map((v, k) => v - p.eye[k]), n = Math.hypot(...d), u = d.map((v) => v / n);
+  let t: number;
+  const hit = u[2] < -0.05 ? -p.eye[2] / u[2] : -1;
+  if (hit > 0 && Math.hypot(p.eye[0] + u[0] * hit, p.eye[1] + u[1] * hit) < TARGET_DISC_M) t = hit;
+  else t = -(p.eye[0] * u[0] + p.eye[1] * u[1]) / (u[0] * u[0] + u[1] * u[1] || 1);   // nearest the axis in plan
+  t = Math.min(MAX_DISTANCE_M * 0.9, Math.max(MIN_DISTANCE_M, t));
+  return { ...p, target: p.eye.map((v, k) => v + u[k] * t) as V3 };
+}
+
 export class CameraRig {
   camera = new THREE.PerspectiveCamera(40, 1, NEAR_M, 8000);
   controls: OrbitControls;
   private hfov = 40;
   /** Camera exposure in stops (Blender camera["exposure"]); interpolated during a flight. */
   exposure = 0;
-  private flight: { from: Pose; to: Pose; expFrom: number; expTo: number; t: number; seconds: number; done: () => void } | null = null;
+  private flight: { plan: Flight; to: Pose; expFrom: number; expTo: number; t: number; done: () => void } | null = null;
   mode: RigMode = "orbit";
   constructor(dom: HTMLElement) {
     this.controls = new OrbitControls(this.camera, dom);
@@ -65,6 +81,13 @@ export class CameraRig {
     this.controls.maxDistance = MAX_DISTANCE_M;
     this.controls.minDistance = MIN_DISTANCE_M;
     this.controls.maxPolarAngle = MAX_POLAR;
+    // seat view: the wheel changes the field of view (dolly is off there)
+    dom.addEventListener("wheel", (e: WheelEvent) => {
+      if (this.mode !== "look" || this.flying) return;
+      e.preventDefault();
+      const p = this.pose();
+      this.apply(zoomedPose(p, Math.exp(e.deltaY * 0.001), "look"));
+    }, { passive: false });
   }
   get flying() { return this.flight !== null; }
   /**
@@ -86,7 +109,7 @@ export class CameraRig {
   /** Zooms from where the camera is going: pressed mid-flight, it must not strand the camera between poses. */
   zoom(f: number) {
     const base = this.flight?.to ?? this.pose(), exp = this.flight?.expTo ?? this.exposure;
-    return this.flyTo(zoomedPose(base, f, this.mode), exp, ZOOM_S);
+    return this.flyTo(zoomedPose(base, f, this.mode), exp, { direct: true, seconds: ZOOM_S });
   }
   pose(): Pose { return { eye: toBlender(this.camera.position), target: toBlender(this.controls.target), hfov: this.hfov }; }
   private apply(p: Pose) {
@@ -106,7 +129,7 @@ export class CameraRig {
    * sphericalDelta/panOffset by `dampingFactor` each call rather than clearing them outright,
    * so a temporary `dampingFactor = 1` consumes the whole remaining delta in one step.
    */
-  flyTo(to: Pose, exposure = this.exposure, seconds = FLIGHT_S) {
+  flyTo(to: Pose, exposure = this.exposure, opts: { direct?: boolean; seconds?: number } = {}) {
     this.flight?.done();
     // flush without the distance clamp: leaving seat view (target 0.1 m ahead) with orbit's 5 m minimum
     // would otherwise push the eye ~5 m back before the flight starts (final review)
@@ -116,19 +139,27 @@ export class CameraRig {
     c.maxDistance = Infinity;
     c.update();
     [c.dampingFactor, c.minDistance, c.maxDistance] = [damping, minD, maxD];
-    return new Promise<void>((done) => { this.flight = { from: this.pose(), to, expFrom: this.exposure, expTo: exposure, t: 0, seconds, done }; this.controls.enabled = false; });
+    return new Promise<void>((done) => { this.flight = { plan: planFlight(this.pose(), to, opts), to, expFrom: this.exposure, expTo: exposure, t: 0, done }; this.controls.enabled = false; });
   }
   jump(p: Pose, exposure = this.exposure) { this.apply(p); this.exposure = exposure; }
   update(dt: number) {
     const f = this.flight;
     if (f) {
-      f.t = Math.min(1, f.t + dt / f.seconds);
-      this.apply(poseAt(f.from, f.to, f.t));
+      f.t = Math.min(1, f.t + dt / f.plan.seconds);
+      this.apply(f.plan.at(f.t));
       this.exposure = exposureAt(f.expFrom, f.expTo, f.t);
       if (f.t >= 1) { this.flight = null; this.controls.enabled = true; f.done(); }
       return;                        // don't let controls.update() re-derive position from stale internal state mid-flight
     }
     this.controls.update();
+    if (this.mode === "orbit") {                // C5: keep the orbit over the site and above the ground
+      const eye = toBlender(this.camera.position), target = toBlender(this.controls.target), c = clampOrbit(eye, target);
+      if (c.eye.some((v, k) => v !== eye[k]) || c.target.some((v, k) => v !== target[k])) {
+        this.camera.position.copy(toThree(c.eye));
+        this.controls.target.copy(toThree(c.target));
+        this.camera.lookAt(this.controls.target);
+      }
+    }
   }
   resize(w: number, h: number) {
     this.camera.aspect = w / h;

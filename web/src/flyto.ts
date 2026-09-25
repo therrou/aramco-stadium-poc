@@ -27,13 +27,3 @@ export function verticalFov(hfovLarger: number, aspect: number) {
 }
 
 export const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
-
-const inside = ([x, y, z]: V3) => Math.hypot(x / 76, y / 63) < 1 && z < 60;   // params.OCULUS_A/B, rim ~56 m
-
-/** Crossing the shell goes through a control point high over the oculus; otherwise a straight line. */
-export function pathPoint(from: V3, to: V3, t: number): V3 {
-  if (inside(from) === inside(to)) return [0, 1, 2].map((k) => from[k] + (to[k] - from[k]) * t) as V3;
-  const c: V3 = [0, 0, Math.max(from[2], to[2], 180)];
-  const u = 1 - t;
-  return [0, 1, 2].map((k) => u * u * from[k] + 2 * u * t * c[k] + t * t * to[k]) as V3;
-}

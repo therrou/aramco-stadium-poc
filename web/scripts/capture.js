@@ -29,3 +29,16 @@ export async function cap(prefix, { cams = CAMS, states = STATES, nudge = true }
   }
   return out.join("\n");
 }
+
+/** v3: runs `act` and saves a frame every `every` ticks until the flight lands (plus the landing frame). */
+export async function flightFrames(prefix, act, every = 12) {
+  const v = window.__viewer, dt = 1 / 60;
+  v.dispatch(act);
+  let n = 0, i = 0;
+  while (v.rig.flying && i < 60 * 6) {
+    if (i % every === 0) await v.save(`${prefix}_${String(n++).padStart(2, "0")}`);
+    v.tick(dt); i++;
+  }
+  await v.save(`${prefix}_${String(n++).padStart(2, "0")}`);
+  return `${n} frames over ${(i / 60).toFixed(2)} s`;
+}

@@ -9,7 +9,7 @@ import { parseSeats, indexSections, SeatDirectory, parseSeatParam, formatSeat, t
 import type { Tier } from "./tiers";
 import { SeatField, SeatHighlight, visibleSections, SEAT_LOD_DIST } from "./seats";
 import { SectionPatches } from "./sectionPatches";
-import { CameraRig, ZOOM_S } from "./camera";
+import { CameraRig, ZOOM_S, pivotOf } from "./camera";
 import { cameraPose, seatViewPose, SEAT_EXP, type Pose } from "./flyto";
 import { nearestSeatToRay } from "./seatPick";
 import { DepthProbe, acceptPatchHit, onClick } from "./picking";
@@ -70,12 +70,12 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const table = parseSeats(a.seatsBin), idx = indexSections(table), dir = new SeatDirectory(table, idx);
   const stage = document.getElementById("stage")!;
   const rig = new CameraRig(renderer.domElement);
-  const overview = cameraPose(a.cameras["CAM_Aerial_SW"]);
+  const overview = pivotOf(cameraPose(a.cameras["CAM_Aerial_SW"]));   // v3: orbit around the stadium, same view
   // final review 2: exposure follows each flight; back at the overview it is CAM_Aerial_SW's, not ?cam's
   const overviewExp = a.cameras["CAM_Aerial_SW"].exposure ?? -0.4;
   const camParam = params.get("cam");
   const camDef = camParam ? a.cameras[camParam] : undefined;
-  rig.jump(camDef ? cameraPose(camDef) : overview, camDef?.exposure ?? overviewExp);
+  rig.jump(camDef ? pivotOf(cameraPose(camDef)) : overview, camDef?.exposure ?? overviewExp);
   const camera = rig.camera;
   const shared: SharedUniforms = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: a.manifest.rgbmRange }, uNight: { value: 0 }, uSoK: { value: specOccK(0) } };
   // one "lightmaps present" flag for materials and Lighting: every state needs every group, else no lightmaps at all
@@ -135,7 +135,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
       highlight.set(null);
       const c = act.type === "camera" ? a.cameras[act.camera] : undefined;
       if (act.type === "back") controls.clearCamera();
-      rig.flyTo(c ? cameraPose(c) : overview, c?.exposure ?? overviewExp);
+      rig.flyTo(c ? pivotOf(cameraPose(c)) : overview, c?.exposure ?? overviewExp);
     }
     if (act.type === "lighting") lighting.request(app.lighting);
     rig.setAutoOrbit(app.autoOrbit);
@@ -153,7 +153,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const controls = new Controls(document.getElementById("controls")!, {
     lighting: (l) => dispatch({ type: "lighting", lighting: l }),
     zoom: (f) => { if (app.autoOrbit) dispatch({ type: "autoOrbit", on: false }); rig.zoom(f); },
-    reset: () => (app.view.kind === "seat" ? rig.flyTo(seatPose(app.view.seat), SEAT_EXP, ZOOM_S * 2) : rig.flyTo(overview, overviewExp)),
+    reset: () => (app.view.kind === "seat" ? rig.flyTo(seatPose(app.view.seat), SEAT_EXP, { direct: true, seconds: ZOOM_S * 2 }) : rig.flyTo(overview, overviewExp)),
     fullscreen: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()),
     camera: (cam) => dispatch({ type: "camera", camera: cam }),
     autoOrbit: (on) => dispatch({ type: "autoOrbit", on }),

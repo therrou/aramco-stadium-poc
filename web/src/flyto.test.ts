@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { seatViewPose, verticalFov, pathPoint, SEAT_EYE_M, SEAT_HFOV, SEAT_LOOK_M } from "./flyto";
+import { seatViewPose, verticalFov, SEAT_EYE_M, SEAT_HFOV, SEAT_LOOK_M } from "./flyto";
 import { visibleSections, SEAT_LOD_DIST } from "./seats";
 import type { SectionsDoc } from "./loader";
 
@@ -31,18 +31,5 @@ describe("seat view pose (spec part 2)", () => {
       worst = Math.max(worst, doc.sections.filter((x) => ids.has(Number(x.id))).reduce((a, x) => a + x.seats, 0));
     }
     expect(worst).toBeLessThanOrEqual(25_000);
-  });
-});
-
-describe("flight path", () => {
-  it("aerial -> inside the bowl dives through the oculus, not the roof", () => {
-    const from: [number, number, number] = [-330, -470, 230], to: [number, number, number] = [0, -20, 35];
-    for (let i = 0; i <= 50; i++) {
-      const [x, y, z] = pathPoint(from, to, i / 50);
-      if (z < 58) expect(Math.hypot(x / 76, y / 63)).toBeLessThan(1.0);  // below the rim => inside the oculus
-    }
-  });
-  it("inside -> inside is a straight line", () => {
-    expect(pathPoint([0, -20, 35], [10, -50, 8], 0.5)).toEqual([5, -35, 21.5]);
   });
 });

@@ -7,7 +7,7 @@ import { ENV_ROTATION_Y, toThree } from "./coords";
 import { LightingTransition, emissionStrength, envSizeMismatch, exposure, sunColor, sunStrength, sunToward } from "./lightingState";
 import { STATES, type Assets, type State } from "./loader";
 import { Sky } from "./background";
-import type { SharedUniforms } from "./stadium";
+import { specOccK, type SharedUniforms } from "./stadium";
 import { clearTreeUniforms, makeTreeUniforms, updateTreeUniforms } from "./treeLight";
 
 /**
@@ -127,6 +127,7 @@ export class Lighting {
     this.shared.uLmBlend.value = e;
     this.shared.uEnvBlend.value = this.envBlend ? e : 0;
     this.shared.uNight.value = n;
+    this.shared.uSoK.value = specOccK(n);
     this.sky.setBlend(e);
     for (const m of this.emissive) m.emissiveIntensity = emissionStrength(m.userData.emDay ?? 0, m.userData.emNight ?? 0, n);
     this.renderer.toneMappingExposure = exposure(n, cameraExposure);

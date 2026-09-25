@@ -36,3 +36,9 @@ Visual notes (v1 side-by-sides): whole-frame means are close from far away, but 
 low in contrast. The sails and the podium read as uniform bright chrome (Approach day), and the pitch and seats
 are hazy and desaturated (Seat_212 day, 1.47× Cycles). At night the sails are silver with a few large blooming
 LEDs where Cycles shows dark skin with a dense stipple. The mock "taken" seats show grey.
+
+## After A1 (specular occlusion, K day 2.0 / golden 1.0 / night 1.2, min 0.1)
+
+Means: Aerial_Dusk 151.9 / 100.7 / 50.5, Approach 187.2 / 133.0 / 76.3, Seat_212 151.4 / 152.1 / 150.0 (day / golden / night).
+No shader errors. Podium glass under the canopy is darker (occluded). The sunlit sails are unchanged, since their
+irradiance is above K; they still read as chrome where Cycles shows pearl white (A2/A5 and Task 8).

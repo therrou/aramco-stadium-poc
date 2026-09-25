@@ -14,7 +14,7 @@ import { cameraPose, sectionFraming, type Pose } from "./flyto";
 import { DepthProbe, acceptPatchHit, onClick } from "./picking";
 import { reduce, initialState, parseLighting, type Action } from "./state";
 import { STATES, type State } from "./loader";
-import { setupStadiumMaterials, type SharedUniforms } from "./stadium";
+import { setupStadiumMaterials, specOccK, type SharedUniforms } from "./stadium";
 import { Lighting, makeComposer } from "./lighting";
 import { missingLightmaps } from "./lightingState";
 import { setupTrees } from "./trees";
@@ -71,7 +71,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const camDef = camParam ? a.cameras[camParam] : undefined;
   rig.jump(camDef ? cameraPose(camDef) : overview, camDef?.exposure ?? overviewExp);
   const camera = rig.camera;
-  const shared: SharedUniforms = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: a.manifest.rgbmRange }, uNight: { value: 0 } };
+  const shared: SharedUniforms = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: a.manifest.rgbmRange }, uNight: { value: 0 }, uSoK: { value: specOccK(0) } };
   // one "lightmaps present" flag for materials and Lighting: every state needs every group, else no lightmaps at all
   const glbGroups = new Set<string>();
   a.stadium.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh && typeof o.userData.lightmap === "string") glbGroups.add(o.userData.lightmap); });

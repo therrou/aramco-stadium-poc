@@ -1,10 +1,25 @@
 import * as THREE from "three";
 import { MAX_CHARTS, chartUniforms, chartsOfMesh, pitchLinesGlsl, type Chart } from "./pitchLines";
+import { STATE_NIGHT } from "./lightingState";
 
 const LM_RE = /vec4 lightMapTexel = texture2D\( lightMap, vLightMapUv \);\s*vec3 lightMapIrradiance = lightMapTexel\.rgb \* lightMapIntensity;/;
 const IBL_IRR_RE = /iblIrradiance \+= getIBLIrradiance\( geometryNormal \);/;
 const IBL_RAD_RE = /vec3 iblRadiance = getIBLRadiance\( geometryViewDir, geometryNormal, material\.roughness \);/;
 const COAT_RAD_RE = /clearcoatRadiance \+= getIBLRadiance\( geometryViewDir, geometryClearcoatNormal, material\.clearcoatRoughness \);/;
+
+/**
+ * A1 (v2): specular occlusion from the baked light. The PMREM sky reaches every surface, so the sail skin
+ * (metal 0.9 + coat), concourse glass and grass mirrored a bright sky even in shade: the main cause of
+ * the washed-out day look. so = clamp( luminance( lightmap irradiance ) / K, min, 1 ). Irradiance is in
+ * the bake's units (W/m^2, decoded RGBM x PI): day sunlit ground ~3, golden ~1.5, night floods ~1.1 in
+ * the bowl. K is the irradiance at which a surface gets its full reflection. Tuned in Task 8.
+ */
+export const SPEC_OCC = { k: { day: 2.0, golden: 1.0, night: 1.2 }, min: 0.1 };
+export function specOccK(n: number) {
+  const g = STATE_NIGHT.golden;
+  return n <= g ? SPEC_OCC.k.day + (SPEC_OCC.k.golden - SPEC_OCC.k.day) * (n / g)
+                : SPEC_OCC.k.golden + (SPEC_OCC.k.night - SPEC_OCC.k.golden) * ((n - g) / (1 - g));
+}
 
 /**
  * Decisions D8/D10: blend two RGBM lightmaps, drop diffuse IBL, blend two PMREMs for specular. The clear
@@ -15,8 +30,13 @@ export function patchLightsChunk(chunk: string) {
   return chunk
     .replace(LM_RE, `vec3 lightMapIrradiance = mix( rgbmDecode( texture2D( lightMap, vLightMapUv ) ), rgbmDecode( texture2D( uLmB, vLightMapUv ) ), uLmBlend ) * lightMapIntensity;`)
     .replace(IBL_IRR_RE, "")
-    .replace(IBL_RAD_RE, `vec3 iblRadiance = mix( getIBLRadiance( geometryViewDir, geometryNormal, material.roughness ), getIBLRadianceB( geometryViewDir, geometryNormal, material.roughness ), uEnvBlend );`)
-    .replace(COAT_RAD_RE, `clearcoatRadiance += mix( getIBLRadiance( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), getIBLRadianceB( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), uEnvBlend );`);
+    .replace(IBL_RAD_RE, `#ifdef USE_LIGHTMAP
+		float lmSo = lmSpecOcc( lightMapIrradiance );
+	#else
+		float lmSo = 1.0;
+	#endif
+	vec3 iblRadiance = mix( getIBLRadiance( geometryViewDir, geometryNormal, material.roughness ), getIBLRadianceB( geometryViewDir, geometryNormal, material.roughness ), uEnvBlend ) * lmSo;`)
+    .replace(COAT_RAD_RE, `clearcoatRadiance += mix( getIBLRadiance( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), getIBLRadianceB( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), uEnvBlend ) * lmSo;`);
 }
 
 const PARS = /* glsl */ `
@@ -24,6 +44,8 @@ uniform sampler2D uLmB; uniform float uLmBlend; uniform float uRgbmRange;
 uniform sampler2D uEnvB; uniform float uEnvBlend; uniform float uNight;
 varying vec3 vWorldPosB;
 vec3 rgbmDecode( vec4 c ) { return c.rgb * c.a * uRgbmRange; }
+uniform float uSoK;
+float lmSpecOcc( vec3 e ) { return clamp( dot( e, vec3( 0.2126, 0.7152, 0.0722 ) ) / uSoK, ${SPEC_OCC.min.toFixed(3)}, 1.0 ); }
 #if defined( USE_ENVMAP ) && defined( ENVMAP_TYPE_CUBE_UV )
 vec3 getIBLRadianceB( const in vec3 viewDir, const in vec3 normal, const in float roughness ) {
   vec3 r = normalize( mix( reflect( - viewDir, normal ), normal, pow4( roughness ) ) );
@@ -46,7 +68,7 @@ float sailLeds( vec3 pB ) {
 }
 `;
 
-export interface SharedUniforms { uLmBlend: { value: number }; uEnvB: { value: THREE.Texture | null }; uEnvBlend: { value: number }; uRgbmRange: { value: number }; uNight: { value: number } }
+export interface SharedUniforms { uLmBlend: { value: number }; uEnvB: { value: THREE.Texture | null }; uEnvBlend: { value: number }; uRgbmRange: { value: number }; uNight: { value: number }; uSoK: { value: number } }
 /** Full uniform set seen by a stadium material: the shared ones plus its own second lightmap. */
 export interface LightingUniforms extends SharedUniforms { uLmB: { value: THREE.Texture | null } }
 

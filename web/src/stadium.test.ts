@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import * as THREE from "three";
-import { splitByGroup, GROUND_RE, OVERLAY_RE, SAIL_COAT, overlayOffset, patchLightsChunk, toCoatedSail } from "./stadium";
+import { splitByGroup, GROUND_RE, OVERLAY_RE, SAIL_COAT, SPEC_OCC, overlayOffset, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
 
 it("patches three r186 lights_fragment_maps (lightmap blend, no diffuse IBL, env blend)", () => {
   const out = patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps);
@@ -49,4 +49,19 @@ it("a material shared across lightmap groups gets one copy per group (same name)
   expect(b.material).not.toBe(m);
   expect(c.material).toBe(b.material);
   expect((b.material as THREE.Material).name).toBe("M_Lawn.web");
+});
+it("A1: sky and clear-coat reflections are scaled by the lightmap specular occlusion", () => {
+  const out = patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps);
+  expect(out).toContain("float lmSo = lmSpecOcc( lightMapIrradiance );");
+  expect(out).toMatch(/vec3 iblRadiance = mix\([^;]*uEnvBlend \) \* lmSo;/);
+  expect(out).toMatch(/clearcoatRadiance \+= mix\([^;]*uEnvBlend \) \* lmSo;/);
+  // lmSo exists even without a lightmap (fallback path compiles)
+  expect(out).toMatch(/#else\s*float lmSo = 1\.0;/);
+});
+it("A1: the occlusion scale K follows the lighting state", () => {
+  expect(specOccK(0)).toBe(SPEC_OCC.k.day);
+  expect(specOccK(0.6)).toBeCloseTo(SPEC_OCC.k.golden, 9);
+  expect(specOccK(1)).toBe(SPEC_OCC.k.night);
+  expect(specOccK(0.3)).toBeCloseTo((SPEC_OCC.k.day + SPEC_OCC.k.golden) / 2, 9);
+  expect(SPEC_OCC.min).toBeGreaterThan(0);
 });

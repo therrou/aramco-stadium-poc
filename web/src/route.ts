@@ -47,7 +47,6 @@ export const FLIGHT_MIN_S = 1.2, FLIGHT_MAX_S = 3.2;
 /** Flight time from path length: long flights are slower on screen but never drag. */
 export const flightSeconds = (len: number) => Math.min(FLIGHT_MAX_S, Math.max(FLIGHT_MIN_S, 1.2 + len / 350));
 
-const APEX_Z = 95, HUB: V3 = [0, 0, 34], LOW_Z = 75;
 const add = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const scale = (a: V3, k: number): V3 => [a[0] * k, a[1] * k, a[2] * k];
@@ -55,82 +54,79 @@ const len3 = (a: V3) => Math.hypot(a[0], a[1], a[2]);
 const unit = (a: V3): V3 => scale(a, 1 / (len3(a) || 1));
 const dirOf = (p: Pose) => unit(sub(p.target, p.eye));
 
+/**
+ * User request (2026-09-25): move with the pitch centred. Routes circle the stadium's axis on the side of
+ * the camera and never pass over the pitch centre, so looking at FOCUS all the way needs no turn through
+ * the vertical (the v3 draft dived through a hub above the centre point and twisted there).
+ */
+export const FOCUS: V3 = [0, 0, 0];
+const bearing = (p: V3) => Math.atan2(p[1], p[0]);
+const radius = (p: V3) => Math.hypot(p[0], p[1]);
+const at = (b: number, r: number, z: number): V3 => [Math.cos(b) * r, Math.sin(b) * r, z];
+/** Plan radius of the oculus rim on bearing b. */
+const rimR = (b: number) => 1 / sup(Math.cos(b), Math.sin(b), OC);
+/** Signed shortest angle from a to b. */
+const turn = (a: number, b: number) => { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; };
+
 /** Where a flight enters or leaves an inside pose: 6 m above it and 8 m toward the pitch (C3), under the roof. */
 function approach(eye: V3): V3 {
-  const r = Math.hypot(eye[0], eye[1]), k = r > 10 ? Math.max(0, (r - 8) / r) : 1;
+  const r = radius(eye), k = r > 10 ? Math.max(0, (r - 8) / r) : 1;
   const q: V3 = [eye[0] * k, eye[1] * k, eye[2] + 6];
   const { O, s } = plan(q);
-  if (O >= 1) q[2] = Math.min(q[2], roofUnder(s) - 3);
+  if (O >= 0.95) q[2] = Math.min(q[2], roofUnder(s) - 3);
   return q;
 }
-/** A point above the stadium's axis, looking down at the pitch while passing the oculus. */
-const apex = (z: number): V3 => [0, 0, Math.max(APEX_Z, Math.min(z, 160))];
-/** An outside point low enough to hit the shell on a straight line gets a waypoint lifted clear of it. */
-function lift(p: V3, towardAxis: number): V3 | null {
-  if (p[2] >= LOW_Z) return null;
-  return [p[0] * towardAxis, p[1] * towardAxis, LOW_Z];
+
+const OUT_R = 200, HIGH_Z = 110, ENTRY_Z = 78, INNER_Z = 40;
+/**
+ * The way into (or out of) the bowl above an inside pose `eye`: high outside the shell on its bearing, into the
+ * oculus on the same side (never above the centre), down below the rim, then its approach point.
+ */
+function gate(eye: V3): V3[] {
+  const b = bearing(eye), q = approach(eye), rr = rimR(b);
+  return [at(b, OUT_R * 0.8, HIGH_Z), at(b, rr * 0.6, ENTRY_Z), at(b, rr * 0.8, Math.min(INNER_Z, q[2] + 3)), q];
+}
+/** Points on an arc around the axis from bearing b0 to b1 (at most 40 degrees apart), radius and height eased. */
+function arc(b0: number, b1: number, r0: number, r1: number, z0: number, z1: number, lift = 0): V3[] {
+  const d = turn(b0, b1), n = Math.max(1, Math.ceil(Math.abs(d) / ((40 * Math.PI) / 180))), out: V3[] = [];
+  for (let i = 1; i < n; i++) {
+    const t = i / n, w = Math.sin(Math.PI * t);
+    out.push(at(b0 + d * t, lerp(r0, r1, t), lerp(z0, z1, t) + lift * w));
+  }
+  return out;
 }
 
-interface Key { i: number; dir: V3 }
-interface Route { pts: V3[]; keys: Key[] }   // a key's i is a waypoint index
-
-/** The view straight down the axis is degenerate for lookAt; lean 20 degrees toward `side` (plan). */
-function downToward(side: V3): V3 {
-  const r = Math.hypot(side[0], side[1]) || 1;
-  return unit([(side[0] / r) * 0.36, (side[1] / r) * 0.36, -1]);
-}
-const lookAt = (from: V3, at: V3) => unit(sub(at, from));
+interface Route { pts: V3[] }
 
 function outToIn(from: Pose, to: Pose): Route {
-  const pts: V3[] = [from.eye], keys: Key[] = [{ i: 0, dir: dirOf(from) }];
-  const l = lift(from.eye, 0.85);
-  if (l && !blocked(l)) pts.push(l);
-  const q = approach(to.eye);
-  pts.push(apex(from.eye[2]));
-  keys.push({ i: pts.length - 1, dir: downToward(to.eye) });
-  pts.push(HUB, q, to.eye);
-  keys.push({ i: pts.length - 2, dir: dirOf(to) }, { i: pts.length - 1, dir: dirOf(to) });
-  return { pts, keys };
-}
-function reverse(r: Route, from: Pose, to: Pose): Route {
-  const n = r.pts.length - 1;
-  const keys = r.keys.map((k) => ({ i: n - k.i, dir: k.dir })).reverse();
-  keys[0] = { i: 0, dir: dirOf(from) };
-  keys[keys.length - 1] = { i: n, dir: dirOf(to) };
-  return { pts: [...r.pts].reverse(), keys };
+  const g = gate(to.eye), hi = g[0];
+  const rf = radius(from.eye), r0 = Math.max(rf, OUT_R), z0 = Math.max(from.eye[2], 90);
+  const pts: V3[] = [from.eye];
+  if (rf < OUT_R || from.eye[2] < 90) pts.push(at(bearing(from.eye), r0, z0));         // clear of the shell first
+  pts.push(...arc(bearing(from.eye), bearing(hi), r0, radius(hi), z0, hi[2]), ...g, to.eye);
+  return { pts };
 }
 function inToOut(from: Pose, to: Pose): Route {
-  // the reverse of the inbound route; on the way out the look keys are the leaving seat's view, then down
-  const r = reverse(outToIn(to, from), from, to);
-  r.keys = r.keys.map((k, j) => (j === 1 ? { i: k.i, dir: dirOf(from) } : k));
-  return r;
+  return { pts: [...outToIn(to, from).pts].reverse() };
 }
 function inToIn(from: Pose, to: Pose): Route {
-  const qa = approach(from.eye), qb = approach(to.eye), chord = len3(sub(qb, qa));
-  const mid: V3 = [(qa[0] + qb[0]) / 4, (qa[1] + qb[1]) / 4, Math.min(Math.max(qa[2], qb[2]) + 0.12 * chord, 44)];
-  const pts = [from.eye, qa, mid, qb, to.eye];
-  return { pts, keys: [{ i: 0, dir: dirOf(from) }, { i: 1, dir: dirOf(from) }, { i: 2, dir: lookAt(mid, [qb[0], qb[1], qb[2] - 6]) }   /* heading for the destination, not down at the grass */, { i: 3, dir: dirOf(to) }, { i: 4, dir: dirOf(to) }] };
+  const qa = approach(from.eye), qb = approach(to.eye);
+  // around the bowl at the approach points' radius and height, lifted a little, under the roof
+  const mid = arc(bearing(qa), bearing(qb), radius(qa), radius(qb), qa[2], qb[2], 4).map((p): V3 => {
+    const { O, s } = plan(p);
+    return O >= 0.95 ? [p[0], p[1], Math.min(p[2], roofUnder(s) - 3)] : p;
+  });
+  return { pts: [from.eye, qa, ...mid, qb, to.eye] };
 }
 function outToOut(from: Pose, to: Pose): Route {
-  const chord = len3(sub(to.eye, from.eye));
-  const mid = add(scale(add(from.eye, to.eye), 0.5), [0, 0, 0.1 * chord]);
-  const straight: Route = { pts: [from.eye, mid, to.eye], keys: [{ i: 0, dir: dirOf(from) }, { i: 2, dir: dirOf(to) }] };
-  if (!sampleRoute(straight, 64).some(blocked)) return straight;
-  // around the stadium: an arc at plan radius >= 200 m, lifted clear of the roof
-  const af = Math.atan2(from.eye[1], from.eye[0]), at = Math.atan2(to.eye[1], to.eye[0]);
-  let d = at - af;
-  if (d > Math.PI) d -= 2 * Math.PI;
-  if (d < -Math.PI) d += 2 * Math.PI;
-  const R = Math.max(200, Math.hypot(from.eye[0], from.eye[1]), Math.hypot(to.eye[0], to.eye[1]));
-  const pts: V3[] = [from.eye], keys: Key[] = [{ i: 0, dir: dirOf(from) }];
-  for (const t of [0.25, 0.5, 0.75]) {
-    const a = af + d * t, z = Math.max(LOW_Z, lerp(from.eye[2], to.eye[2], t) + 0.08 * chord);
-    pts.push([Math.cos(a) * R, Math.sin(a) * R, z]);
-  }
-  keys.push({ i: 2, dir: lookAt(pts[2], [0, 0, 25]) });
+  const rf = Math.max(radius(from.eye), OUT_R), rt = Math.max(radius(to.eye), OUT_R);
+  const zf = Math.max(from.eye[2], 60), zt = Math.max(to.eye[2], 60);
+  const pts: V3[] = [from.eye];
+  if (radius(from.eye) < OUT_R || from.eye[2] < 60) pts.push(at(bearing(from.eye), rf, zf));
+  pts.push(...arc(bearing(from.eye), bearing(to.eye), rf, rt, zf, zt, 30));
+  if (radius(to.eye) < OUT_R || to.eye[2] < 60) pts.push(at(bearing(to.eye), rt, zt));
   pts.push(to.eye);
-  keys.push({ i: pts.length - 1, dir: dirOf(to) });
-  return { pts, keys };
+  return { pts };
 }
 
 /** Centripetal Catmull-Rom through the waypoints; u in [0, 1] spans waypoint 0 .. last. */
@@ -185,9 +181,9 @@ export interface Flight { seconds: number; length: number; at(t: number): Pose }
  */
 export function planFlight(from: Pose, to: Pose, opts: { direct?: boolean; seconds?: number } = {}): Flight {
   const fi = isInside(from.eye), ti = isInside(to.eye);
-  const r: Route = opts.direct ? { pts: [from.eye, to.eye], keys: [{ i: 0, dir: dirOf(from) }, { i: 1, dir: dirOf(to) }] }
+  const r: Route = opts.direct ? { pts: [from.eye, to.eye] }
     : fi && ti ? inToIn(from, to) : !fi && ti ? outToIn(from, to) : fi && !ti ? inToOut(from, to) : outToOut(from, to);
-  const c = curve(r.pts), N = 512, n = r.pts.length - 1;
+  const c = curve(r.pts), N = 512;
   const us: number[] = [0], acc: number[] = [0];
   let prev = c(0);
   for (let i = 1; i <= N; i++) { const p = c(i / N); acc.push(acc[i - 1] + len3(sub(p, prev))); us.push(i / N); prev = p; }
@@ -200,11 +196,14 @@ export function planFlight(from: Pose, to: Pose, opts: { direct?: boolean; secon
     return us[lo] + (span > 0 ? (target - acc[lo]) / span : 0) * (us[hi] - us[lo]);
   };
   const dist0 = len3(sub(from.target, from.eye)), dist1 = len3(sub(to.target, to.eye));
-  const look = (u: number): V3 => {
-    const x = u * n, ks = r.keys;
-    if (x <= ks[0].i) return ks[0].dir;
-    for (let j = 1; j < ks.length; j++) if (x <= ks[j].i) return slerp(ks[j - 1].dir, ks[j].dir, smooth((x - ks[j - 1].i) / (ks[j].i - ks[j - 1].i || 1)));
-    return ks.at(-1)!.dir;
+  // the view: from the start view into "looking at the pitch centre" over the first 22 % of the way, held
+  // there, and into the destination view over the last 22 % (direct flights slerp start to end)
+  const d0 = dirOf(from), d1 = dirOf(to);
+  const look = (e: number, eye: V3): V3 => {
+    if (opts.direct) return slerp(d0, d1, smooth(e));
+    const focus = unit(sub(FOCUS, eye));
+    const v = slerp(d0, focus, smooth(Math.min(1, e / 0.22)));
+    return slerp(v, d1, smooth(Math.max(0, (e - 0.78) / 0.22)));
   };
   const seconds = opts.seconds ?? flightSeconds(length), ease = opts.direct ? easeInOutCubic : motionProfile(seconds);
   return {
@@ -213,7 +212,7 @@ export function planFlight(from: Pose, to: Pose, opts: { direct?: boolean; secon
     at(t: number): Pose {
       if (t <= 0) return from;
       if (t >= 1) return to;
-      const e = ease(t), u = uAt(e), eye = c(u), dir = look(u);
+      const e = ease(t), u = uAt(e), eye = c(u), dir = look(e, eye);
       const dist = Math.exp(lerp(Math.log(dist0), Math.log(dist1), smooth(e)));
       return { eye, target: add(eye, scale(dir, dist)), hfov: lerp(from.hfov, to.hfov, smooth(e)) };
     },

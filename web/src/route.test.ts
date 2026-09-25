@@ -10,6 +10,7 @@ const doc: SectionsDoc = JSON.parse(readFileSync(new URL("../../data/sections.js
 const CAM: Record<string, Pose> = {
   aerialSW: { eye: [-330, -470, 230], target: [-276.7634, -392.5649, 195.7995], hfov: 46.4 },
   approach: { eye: [-45.5818, -228.6689, 1.7], target: [-26.1217, -131.0438, 11.2205], hfov: 73.7 },
+  seat201: { eye: [-2.03, -68.389, 11.881], target: [0.8671, 29.1754, -9.8628], hfov: 62 },
   top: { eye: [0, 0.01, 820], target: [0, 0.0076, 720], hfov: 39.6 },
   bowl: { eye: [54.903, -85.636, 33.444], target: [-10.6811, -14.6731, 7.6956], hfov: 96.7 },
   seat312: { eye: [99.896, -2, 25.871], target: [5.0116, -0.0996, -5.6463], hfov: 62 },
@@ -34,6 +35,10 @@ const pairs: [string, Pose, Pose][] = [
   ["seat 101 -> seat 312 (inside -> inside)", CAM.seat101, CAM.seat312],
   ["aerial SW -> aerial E (outside -> outside)", CAM.aerialSW, CAM.aerialE],
   ["approach -> aerial E", CAM.approach, CAM.aerialE],
+  ["aerial -> bowl (Stadium button)", CAM.aerialSW, CAM.bowl],
+  ["aerial -> centre-line classic (hero)", CAM.aerialSW, CAM.seat201],
+  ["bowl -> centre-line classic (opposite side)", CAM.bowl, CAM.seat201],
+  ["seat 312 -> seat 101 (across the bowl)", CAM.seat312, CAM.seat101],
 ];
 
 describe("flight routes (spec v3 C2-C4)", () => {
@@ -55,6 +60,30 @@ describe("flight routes (spec v3 C2-C4)", () => {
       expect(angle(dirOf(s.at(-1)!), dirOf(to))).toBeLessThan(1e-6);
     });
   }
+  it("mid-flight the view stays on the pitch centre (user request 2026-09-25)", () => {
+    for (const [name, from, to] of pairs) {
+      const s = samples(from, to, 400), cum = [0];
+      for (let i = 1; i < s.length; i++) cum.push(cum[i - 1] + Math.hypot(...s[i].eye.map((v, k) => v - s[i - 1].eye[k])));
+      for (let i = 0; i < s.length; i++) {
+        const f = cum[i] / cum.at(-1)!;
+        if (f < 0.25 || f > 0.75) continue;                // the middle half of the way
+        const p = s[i], toCentre = norm([-p.eye[0], -p.eye[1], -p.eye[2]]);
+        expect(angle(dirOf(p), toCentre), `${name} @${i}`).toBeLessThan((2 * Math.PI) / 180);
+      }
+    }
+  });
+  it("mid-flight the view is never steeper than 70 degrees down (no roll flip around the vertical)", () => {
+    for (const [name, from, to] of pairs) {
+      if (from === CAM.top || to === CAM.top) continue;
+      for (const p of samples(from, to, 200).slice(20, 181)) expect(Math.asin(-dirOf(p)[2]), name).toBeLessThan((70 * Math.PI) / 180);
+    }
+  });
+  it("the camera never crosses over the pitch centre: its plan distance to the axis stays >= 20 m mid-flight", () => {
+    for (const [name, from, to] of pairs) {
+      if (from === CAM.top || to === CAM.top) continue;       // Top view itself sits on the axis
+      for (const p of samples(from, to, 200).slice(10, 191)) expect(Math.hypot(p.eye[0], p.eye[1]), name).toBeGreaterThan(20);
+    }
+  });
   it("every section's seat view is reachable from the overview and back without passing through geometry", () => {
     for (const p of seatPoses) {
       for (const [a, b] of [[CAM.aerialSW, p], [p, CAM.aerialSW]] as const) {

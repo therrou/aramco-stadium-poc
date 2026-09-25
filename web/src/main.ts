@@ -24,7 +24,8 @@ async function boot() {
   const missing = missingCapabilities(probe());
   if (missing.length) return showFatal(`Missing: ${missing.join(", ")}.`);
   const canvas = document.getElementById("view") as HTMLCanvasElement;
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance",
+    reversedDepthBuffer: !params.has("noreverse") });   // Task 13b (A); ignored without EXT_clip_control
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   const L = makeLoaders(renderer);
   const done = new Map<string, unknown>();
@@ -61,7 +62,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const useLightmaps = missing.length === 0;
   if (!useLightmaps && STATES.some((s) => Object.keys(a.lightmaps[s]).length > 0))
     console.warn(`Lighting: incomplete lightmap bake, using fallback lights. Missing: ${missing.join(", ")}`);
-  const groups = setupStadiumMaterials(a.stadium.scene, shared, useLightmaps);
+  const groups = setupStadiumMaterials(a.stadium.scene, shared, useLightmaps, renderer.capabilities.reversedDepthBuffer);
   const emissive = new Set<THREE.MeshStandardMaterial>();   // Set: the optimized glb shares materials between meshes
   a.stadium.scene.traverse((o) => {
     const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial;
@@ -86,7 +87,8 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   renderer.info.autoReset = false;
   exposeViewerHooks({ get fps() { return perf.fps; }, info: renderer.info, scene, flyTo: (p: Pose) => rig.flyTo(p),
     setState: (s: State) => dispatch({ type: "lighting", lighting: s }),
-    get night() { return lighting.t.night; }, tick: (dt = 1 / 60) => frame(dt) });
+    get night() { return lighting.t.night; }, tick: (dt = 1 / 60) => frame(dt),
+    renderer, composer, camera, rig, lighting, stadium: a.stadium.scene, assets: a });
 
   let app = { ...initialState, lighting: startState };
   const lightingChanged = (l: State) => lighting.request(l);

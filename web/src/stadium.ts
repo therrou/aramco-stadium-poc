@@ -44,7 +44,20 @@ export interface SharedUniforms { uLmBlend: { value: number }; uEnvB: { value: T
 /** Full uniform set seen by a stadium material: the shared ones plus its own second lightmap. */
 export interface LightingUniforms extends SharedUniforms { uLmB: { value: THREE.Texture | null } }
 
-export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUniforms, useLightmaps: boolean) {
+/**
+ * Flat decals that sit on another surface by design (Task 13b, A): road lines lie exactly on the asphalt
+ * (both z = 0.02), glow strips 5 mm above it, pitch lines 1 cm above the grass, podium strips on the deck.
+ */
+export const OVERLAY_RE = /^M_(RoadLine|StreetGlow|PodiumStrip|LineWhite)\b/;
+/**
+ * polygonOffset pulling overlays toward the camera. three negates `factor` for a reversed depth buffer
+ * but passes `units` through, so units' sign is set here.
+ */
+export function overlayOffset(reversedDepth: boolean) {
+  return { factor: -1, units: reversedDepth ? 4 : -4 };
+}
+
+export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUniforms, useLightmaps: boolean, reversedDepth = false) {
   const byGroup = new Map<string, THREE.MeshStandardMaterial[]>();
   const seen = new Set<THREE.Material>();          // the optimized glb shares materials between meshes
   const chunk = patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps);
@@ -55,9 +68,16 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
     if (seen.has(mat)) return;
     seen.add(mat);
     const group = (o.userData.lightmap ?? o.parent?.userData.lightmap) as string | undefined;
-    const ex = mat.userData as { emDay?: number; emNight?: number; special?: string };
+    const ex = mat.userData as { emDay?: number; emNight?: number; special?: string; tint?: number[] };
+    if (Array.isArray(ex.tint) && ex.tint.length === 3) mat.color.setRGB(ex.tint[0], ex.tint[1], ex.tint[2]);   // Task 13b (E): linear, may exceed 1
     mat.userData.lmB = { value: null as THREE.Texture | null };
     mat.lightMapIntensity = Math.PI;        // Cycles diffuse bake is E/π; three multiplies by albedo/π
+    if (OVERLAY_RE.test(mat.name)) {
+      const o = overlayOffset(reversedDepth);
+      mat.polygonOffset = true;
+      mat.polygonOffsetFactor = o.factor;
+      mat.polygonOffsetUnits = o.units;
+    }
     if (group) (byGroup.get(group) ?? byGroup.set(group, []).get(group)!).push(mat);
     mat.onBeforeCompile = (s) => {
       Object.assign(s.uniforms, shared, { uLmB: mat.userData.lmB });

@@ -10,11 +10,50 @@ import { Sky } from "./background";
 import type { SharedUniforms } from "./stadium";
 import { clearTreeUniforms, makeTreeUniforms, updateTreeUniforms } from "./treeLight";
 
-export const BLOOM = { strength: 0.6, radius: 0.4, threshold: 1.0 };   // tuned in Task 14
+/**
+ * Task 13b (B): bloom runs on the linear HDR scene before exposure. Measured at CAM_Aerial_SW (day, bloom
+ * off): 18.6 % of pixels were above the old threshold 1.0 (sunlit sails 2-3, sky 2-3.6, specular peaks
+ * up to 11.5), so the whole frame bloomed into a milky haze. The threshold now sits above the brightest
+ * non-emissive radiance, so only lamps, LEDs and lit windows bloom (night peaks 50-130).
+ */
+export const BLOOM = { strength: 0.35, radius: 0.15, threshold: 12.0 };
+/**
+ * Blender renders with "AgX - Medium High Contrast"; three's AgX is the base look. The look is a contrast
+ * about middle grey in AgX log space: AgX log of 0.18 is (log2(0.18) + 12.47) / 16.5 = 0.606.
+ */
+export const AGX_LOOK = { contrast: 1.2, pivot: 0.606 };
+
+/** three's AgX with the look applied between the log encoding and the sigmoid (renderer.toneMapping = Custom). */
+export function agxLookChunk(chunk: string, look = AGX_LOOK) {
+  const agx = /vec3 AgXToneMapping\( vec3 color \) \{[\s\S]*?\n\}/.exec(chunk);
+  const sig = "color = agxDefaultContrastApprox( color );";
+  if (!agx || !agx[0].includes(sig) || !chunk.includes("vec3 CustomToneMapping( vec3 color ) { return color; }"))
+    throw new Error("three.js tonemapping_pars_fragment changed");
+  const body = agx[0].replace("vec3 AgXToneMapping(", "vec3 CustomToneMapping(")
+    .replace(sig, `color = clamp( ( color - ${look.pivot.toFixed(4)} ) * ${look.contrast.toFixed(4)} + ${look.pivot.toFixed(4)}, 0.0, 1.0 );\n\t${sig}`);
+  return chunk.replace("vec3 CustomToneMapping( vec3 color ) { return color; }", body);
+}
+
+/**
+ * Task 13b (A): the scene pass renders into a float depth attachment. With the renderer's reversed depth
+ * buffer (EXT_clip_control) that gives ~float32 relative precision at any distance, so the 1-3 cm layer
+ * gaps of the site (sand -0.05, lawn/plaza -0.01, paving 0.01, asphalt 0.02-0.03, glow 0.035) stay
+ * separate out to the 8 km far plane. Without a float depth texture three allocates DEPTH_COMPONENT24,
+ * where reversed Z gains little. MSAA only below DPR 2 (at DPR 2 four samples cost ~280 MB of targets).
+ */
+export function sceneTarget(renderer: THREE.WebGLRenderer) {
+  const reversed = renderer.capabilities.reversedDepthBuffer;
+  return new THREE.WebGLRenderTarget(1, 1, {
+    type: THREE.HalfFloatType,
+    samples: renderer.getPixelRatio() < 2 ? 4 : 0,
+    ...(reversed ? { depthTexture: new THREE.DepthTexture(1, 1, THREE.FloatType) } : {}),
+  });
+}
 
 export function makeComposer(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
-  renderer.toneMapping = THREE.AgXToneMapping;
-  const c = new EffectComposer(renderer);
+  THREE.ShaderChunk.tonemapping_pars_fragment = agxLookChunk(THREE.ShaderChunk.tonemapping_pars_fragment);
+  renderer.toneMapping = THREE.CustomToneMapping;
+  const c = new EffectComposer(renderer, sceneTarget(renderer));
   c.addPass(new RenderPass(scene, camera));
   c.addPass(new UnrealBloomPass(new THREE.Vector2(256, 256), BLOOM.strength, BLOOM.radius, BLOOM.threshold));
   c.addPass(new OutputPass());

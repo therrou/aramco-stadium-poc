@@ -4,6 +4,8 @@ import { toBlender, toThree, type V3 } from "./coords";
 import { easeInOutCubic, pathPoint, verticalFov, type Pose } from "./flyto";
 
 export const FLIGHT_S = 1.5;
+/** Near plane (Task 13b): 0.1 -> 0.5 m. The closest views (section seats) keep geometry >= ~1 m away. */
+export const NEAR_M = 0.5;
 const lerp3 = (a: V3, b: V3, t: number) => a.map((v, k) => v + (b[k] - v) * t) as V3;
 
 export function poseAt(from: Pose, to: Pose, t: number): Pose {
@@ -14,7 +16,7 @@ export function poseAt(from: Pose, to: Pose, t: number): Pose {
 }
 
 export class CameraRig {
-  camera = new THREE.PerspectiveCamera(40, 1, 0.1, 8000);
+  camera = new THREE.PerspectiveCamera(40, 1, NEAR_M, 8000);
   controls: OrbitControls;
   private hfov = 40;
   private flight: { from: Pose; to: Pose; t: number; done: () => void } | null = null;

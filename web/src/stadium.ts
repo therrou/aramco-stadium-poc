@@ -61,14 +61,15 @@ export function patchLightsChunk(chunk: string) {
 	lightMapIrradiance = mix( lightMapIrradiance, sailNightIrradiance( vWorldPosB ), smoothstep( 0.6, 1.0, uNight ) );
 #endif
 #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
-	{   // S1 (v3): outside the shell, swap the bake's (blurred) direct sun for the live one. The sky share is
+	{   // S1 (v3): outside the shell, sharpen the bake's (blurred) direct sun with the live shadow. The sky share is
 		// estimated from the outdoor model's ambient; what the texel has above it is baked direct sun (vb)
 		vec3 es = uSun * max( dot( geometryNormal, uSunDirView ), 0.0 );
 		float esl = dot( es, vec3( 0.2126, 0.7152, 0.0722 ) ), el = dot( lightMapIrradiance, vec3( 0.2126, 0.7152, 0.0722 ) );
 		float sky = min( el, PI * dot( uAmbient, vec3( 0.2126, 0.7152, 0.0722 ) ) );
 		float vb = esl > 1e-4 ? clamp( ( el - sky ) / esl, 0.0, 1.0 ) : 0.0;
-		vec3 live = max( lightMapIrradiance - es * vb, vec3( 0.0 ) ) + es * sunVisibility();
-		lightMapIrradiance = mix( lightMapIrradiance, live, outsideShell( vWorldPosB ) );
+		// final review 4: only take baked sun away where the live map says shadow; never add sun (baked shadows
+		// of casters missing from the map, e.g. impostor trees, and texels outside its frustum must stay)
+		lightMapIrradiance = max( lightMapIrradiance - es * vb * ( 1.0 - sunVisibility() ) * outsideShell( vWorldPosB ) * sunInShadowMap(), vec3( 0.0 ) );
 	}
 #endif`)
     .replace(IBL_IRR_RE, "")

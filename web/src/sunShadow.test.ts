@@ -15,6 +15,7 @@ describe("S1 sun shadows", () => {
     expect(sh.light.castShadow).toBe(true);
     expect(sh.light.intensity).toBe(0);                       // only the shadow is used; the sun is in the lightmaps
     expect(sh.light.shadow.mapSize.x).toBe(SHADOW.mapSize);
+    expect(sh.light.shadow.camera.layers.isEnabled(2)).toBe(true);   // trees and far site live on layer 2
     const cam = sh.light.shadow.camera as THREE.OrthographicCamera;
     expect(cam.right - cam.left).toBeCloseTo(2 * SHADOW.radius, 6);
     renderer.shadowMap.needsUpdate = false;
@@ -49,8 +50,8 @@ describe("S2 ruling: live shadows only outside the shell", () => {
   });
 });
 
-it("S1: outside the shell the baked direct sun is replaced by the live one (removes the bake's blurred halos too)", () => {
+it("S1 (final review 4): the live shadow only takes baked sun away, never adds it, and only inside the map", () => {
   const out = patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps);
-  expect(out).toContain("PI * dot( uAmbient, vec3( 0.2126, 0.7152, 0.0722 ) )");   // sky share estimate
-  expect(out).toContain("+ es * sunVisibility()");
+  expect(out).toContain("es * vb * ( 1.0 - sunVisibility() ) * outsideShell( vWorldPosB ) * sunInShadowMap()");
+  expect(out).not.toContain("+ es * sunVisibility()");
 });

@@ -31,6 +31,7 @@ export class SunShadow {
     l.shadow.radius = SHADOW.blur;
     cam.left = cam.bottom = -SHADOW.radius;
     cam.right = cam.top = SHADOW.radius;
+    cam.layers.enableAll();                   // casters on the main-camera-only layers (trees, far site) still cast
     cam.near = 1;
     cam.far = SHADOW.distance * 2;
     cam.updateProjectionMatrix();

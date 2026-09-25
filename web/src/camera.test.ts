@@ -174,7 +174,7 @@ describe("final review fixes", () => {
     rig.flyTo(seat);
     run(rig, 0.5);
     rig.zoom(0.5);
-    run(rig, 2);
+    run(rig, 4);
     const p = rig.pose();
     expect(Math.hypot(...p.eye.map((v, k) => v - seat.eye[k]))).toBeLessThan(0.01);
     expect(p.hfov).toBeCloseTo(35, 6);

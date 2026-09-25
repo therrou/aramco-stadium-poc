@@ -21,3 +21,10 @@ describe("plaza reflection (v3, option 2)", () => {
     expect(PLANAR.gain.night).toBeGreaterThan(PLANAR.gain.day);
   });
 });
+import { PlazaReflection, BOWL_LAYER, NO_REFLECT_LAYER } from "./planarReflect";
+it("final review 5: the mirror pass skips the bowl-only layer (seats, patches), so it adds no seat triangles", () => {
+  const r = new PlazaReflection() as unknown as { cam: THREE.PerspectiveCamera };
+  expect(r.cam.layers.isEnabled(0)).toBe(true);
+  expect(r.cam.layers.isEnabled(BOWL_LAYER)).toBe(false);
+  expect(r.cam.layers.isEnabled(NO_REFLECT_LAYER)).toBe(false);
+});

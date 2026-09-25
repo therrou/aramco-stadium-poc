@@ -128,3 +128,59 @@ describe("flight routes (spec v3 C2-C4)", () => {
     expect(mid.every((v, k) => Math.min(CAM.aerialSW.eye[k], to.eye[k]) - 1e-6 <= v && v <= Math.max(CAM.aerialSW.eye[k], to.eye[k]) + 1e-6)).toBe(true);
   });
 });
+
+import { clampOrbit, CameraRig } from "./camera";
+describe("final review fixes (routes)", () => {
+  const rnd = (() => { let a = 7; return () => { a = (a * 1103515245 + 12345) & 0x7fffffff; return a / 0x7fffffff; }; })();
+  it("any orbit pose the limits allow flies to a seat and to the overview without passing through geometry (review 2)", () => {
+    const seat312 = seatPoses[doc.sections.findIndex((s) => s.id === "312")];
+    let bad = 0, n = 0;
+    for (let i = 0; i < 1500; i++) {
+      const tgt: V3 = [(rnd() - 0.5) * 100, (rnd() - 0.5) * 60, rnd() * 5], d = 15 + rnd() * 385;
+      const pol = rnd() * (85 * Math.PI / 180), az = rnd() * 2 * Math.PI;
+      const eye: V3 = [tgt[0] + d * Math.sin(pol) * Math.cos(az), tgt[1] + d * Math.sin(pol) * Math.sin(az), tgt[2] + d * Math.cos(pol)];
+      const c = clampOrbit(eye, tgt), from = { eye: c.eye, target: c.target, hfov: 50 };
+      expect(blocked(c.eye), `clamped eye ${c.eye.map((v) => v.toFixed(1))}`).toBe(false);
+      for (const to of [seat312, CAM.aerialSW]) { n++; const b = samples(from, to, 100).find((p) => blocked(p.eye)); if (b) { bad++; if (bad <= 4) console.log("BAD", from.eye.map((v) => v.toFixed(1)).join(","), "->", to === seat312 ? "seat" : "aerial", "at", b.eye.map((v) => v.toFixed(1)).join(",")); } }
+    }
+    expect(`${bad}/${n}`).toBe(`0/${n}`);
+  });
+  it("antiparallel start and end views turn about the vertical (a head turn), never through straight up or down", () => {
+    const from = { eye: [0, -150, 30] as V3, target: [0, -250, 30] as V3, hfov: 50 };   // looking away from the pitch
+    const to = { eye: [0, -150, 30.001] as V3, target: [0, -50, 30.001] as V3, hfov: 50 };
+    for (const p of samples(from, to, 100)) expect(Math.abs(dirOf(p)[2])).toBeLessThan(0.7);
+  });
+  it("flying to the pose you are at does nothing", () => {
+    const f = planFlight(CAM.approach, { ...CAM.approach });
+    expect(f.length).toBeLessThan(1e-6);
+    f.at(0.5).eye.forEach((v, k) => expect(v).toBeCloseTo(CAM.approach.eye[k], 6));
+  });
+  it("from Top view (on the axis) the route heads straight for the destination's side", () => {
+    const s = samples(CAM.top, CAM.approach, 100), b0 = Math.atan2(CAM.approach.eye[1], CAM.approach.eye[0]);
+    for (const p of s.slice(10, 90)) {
+      if (Math.hypot(p.eye[0], p.eye[1]) < 30) continue;
+      let d = Math.atan2(p.eye[1], p.eye[0]) - b0; d = Math.atan2(Math.sin(d), Math.cos(d));
+      expect(Math.abs(d)).toBeLessThan(Math.PI / 3);
+    }
+  });
+});
+describe("final review fixes (rig)", () => {
+  const stub = () => ({ style: {}, clientWidth: 800, clientHeight: 600, ownerDocument: { addEventListener() {}, removeEventListener() {} }, addEventListener() {}, removeEventListener() {}, getRootNode() { return this; }, setPointerCapture() {}, releasePointerCapture() {} }) as unknown as HTMLElement;
+  it("zoom pressed mid-flight re-plans the full route (no straight cut through the roof, review 1)", () => {
+    const rig = new CameraRig(stub()), to = seatPoses[doc.sections.findIndex((s) => s.id === "312")];
+    rig.jump(CAM.aerialSW);
+    rig.setMode("look");
+    rig.flyTo(to);
+    for (let i = 0; i < 20; i++) rig.update(1 / 60);
+    rig.zoom(0.7);
+    let hit = 0;
+    for (let i = 0; i < 400 && rig.flying; i++) { rig.update(1 / 60); if (blocked(rig.pose().eye)) hit++; }
+    expect(hit).toBe(0);
+  });
+  it("landing on a Blender camera below the orbit floor keeps its height (no snap, review 3)", () => {
+    const rig = new CameraRig(stub());
+    rig.jump(CAM.approach);
+    for (let i = 0; i < 5; i++) rig.update(1 / 60);
+    expect(rig.pose().eye[2]).toBeCloseTo(CAM.approach.eye[2], 3);
+  });
+});

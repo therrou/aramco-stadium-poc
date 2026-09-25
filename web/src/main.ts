@@ -18,7 +18,7 @@ import { STATES, type State } from "./loader";
 import { GROUND_RE, setupStadiumMaterials, specOccK, type SharedUniforms } from "./stadium";
 import { Lighting, makeComposer } from "./lighting";
 import { SunShadow } from "./sunShadow";
-import { PlazaReflection } from "./planarReflect";
+import { BOWL_LAYER, NO_REFLECT_LAYER, PlazaReflection } from "./planarReflect";
 import { missingLightmaps } from "./lightingState";
 import { setupTrees } from "./trees";
 import { heroesIn } from "./heroViews";
@@ -120,13 +120,21 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const patches = new SectionPatches(table, idx, lighting.outdoor, (id) => tierOf.get(id));
   const highlight = new SeatHighlight();
   scene.add(seats.mesh, seats.near, patches.mesh, highlight.mesh);
-  for (const m of [seats.mesh, seats.near]) { m.castShadow = true; m.receiveShadow = true; }
-  patches.mesh.receiveShadow = true;
+  // seats sit inside the shell, where the live shadow is not read (S2): they neither cast nor receive, and
+  // they live on the bowl-only layer the plaza's mirror pass skips (final review 5)
+  for (const m of [seats.mesh, seats.near, patches.mesh, highlight.mesh]) m.layers.set(BOWL_LAYER);
+  camera.layers.enable(BOWL_LAYER);
+  camera.layers.enable(NO_REFLECT_LAYER);
+  a.stadium.scene.traverse((o) => {
+    if (!(o as THREE.Mesh).isMesh) return;
+    if (o.name.startsWith("site__")) o.layers.set(NO_REFLECT_LAYER);
+    else if (/^(bowl|pitch)__/.test(o.name)) o.layers.set(BOWL_LAYER);   // behind the shell in any plaza reflection
+  });
   if (a.trees) {
     setupTrees(a.trees, a.impostors, lighting.outdoor);
     a.trees.scene.traverse((o) => {          // S1: tree meshes cast; impostor billboards (shader material) do not
       const m = o as THREE.Mesh;
-      if (m.isMesh) { m.castShadow = !(m.material as THREE.ShaderMaterial).isShaderMaterial; m.receiveShadow = true; }
+      if (m.isMesh) { m.castShadow = !(m.material as THREE.ShaderMaterial).isShaderMaterial; m.receiveShadow = true; m.layers.set(NO_REFLECT_LAYER); }
     });
     scene.add(a.trees.scene);
   }
@@ -184,7 +192,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const controls = new Controls(document.getElementById("controls")!, {
     lighting: (l) => dispatch({ type: "lighting", lighting: l }),
     zoom: (f) => { if (app.autoOrbit) dispatch({ type: "autoOrbit", on: false }); rig.zoom(f); },
-    reset: () => (app.view.kind === "seat" ? rig.flyTo(seatPose(app.view.seat), SEAT_EXP, { direct: true, seconds: ZOOM_S * 2 }) : rig.flyTo(overview, overviewExp)),
+    reset: () => (app.view.kind === "seat" ? rig.flyTo(seatPose(app.view.seat), SEAT_EXP, rig.flying ? {} : { direct: true, seconds: ZOOM_S * 2 }) : rig.flyTo(overview, overviewExp)),
     fullscreen: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()),
     camera: (cam) => dispatch({ type: "camera", camera: cam }),
     autoOrbit: (on) => dispatch({ type: "autoOrbit", on }),
@@ -194,6 +202,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
 
   // picking: section strips (always raycastable, even where seats are drawn), wall check, nearest seat to the ray
   const ray = new THREE.Raycaster(), probe = new DepthProbe(renderer);
+  ray.layers.enable(BOWL_LAYER);                         // the section patches live on the bowl-only layer
   const pickSeat = (ndc: THREE.Vector2): number => {
     ray.setFromCamera(ndc, rig.camera);
     const hit = ray.intersectObject(patches.mesh, false)[0];
@@ -237,8 +246,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     }
     const focus = app.view.kind === "seat" ? app.view.seat.section : -1;
     const vis = visibleSections(toBlender(camera.position), a.sections.sections, SEAT_LOD_DIST, focus);
-    if (seats.setVisibleSections(vis, nearSections(toBlender(camera.position), a.sections.sections, SEAT_NEAR_M, NEAR_SEAT_CAP)) && sun)
-      renderer.shadowMap.needsUpdate = true;             // the drawn seats changed: their shadows too
+    seats.setVisibleSections(vis, nearSections(toBlender(camera.position), a.sections.sections, SEAT_NEAR_M, NEAR_SEAT_CAP));
     patches.setHidden(vis);
     highlight.update(now / 1000);
     lighting.update(dt, rig.exposure, camera);

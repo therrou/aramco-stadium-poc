@@ -217,3 +217,46 @@ Remaining gaps:
 - `CAM_Approach`: day 0.97, golden 0.95, night **0.82** (was 0.62).
 - Cost: +2.4 ms per frame at a 3840×2160 buffer (22.9 against 20.5 ms). Nothing is added in views where the
   reflection is off.
+
+## v3 final review and fix pass
+
+A fresh reviewer found no Critical issues and 5 Important ones, all fixed with tests that failed first. I also
+fixed three camera minors I re-graded to Important (the camera is what the user reviews most closely) and the
+seat-shadow waste.
+
+Important:
+1. Zoom mid-flight cut straight through the roof. It now re-plans the whole route to the zoomed destination.
+2. Orbit poses could rest inside the roof or trusses, and flights from them crossed geometry.
+   - The eye now keeps 2 m clear of the roof band: it slides toward the target, or rises over the roof.
+   - `isInside` and `blocked` now agree near the rim.
+   - Eyes above the shell climb clear before leaving.
+   - Approach points high in the bowl stay under 40 m.
+   - Fuzz test: 1,500 random orbit poses, each flown to a seat and to the overview. **0 of 3,000 flights pass through
+     geometry** (the reviewer found 31 of 2,941).
+3. Landing on `CAM_Approach` (1.7 m) snapped the eye up to the 3 m floor. The floor now relaxes to the landed height.
+4. Baked shadows were erased outside the shadow frustum and under casters missing from the map. The live shadow now
+   only takes baked sun away, and only inside the map; it never adds sun.
+5. The triangle and draw-call budget was not re-checked with the reflection on.
+   - Re-measured over every camera, 60 exterior orbit poses (low ones reflect), and seat views: worst case
+     **1.98 M triangles, 113 calls**. Before the fix it was 2.75 M.
+   - What changed: the mirror pass skips the bowl-only layer (seats, section patches, stands, pitch: all behind the
+     shell in any reflection) and the not-reflected layer (trees, far site).
+   - The seat picking ray and the shadow camera enable these layers.
+
+Camera minors fixed:
+- Opposite start and end views now turn about the vertical instead of flipping through straight up or down.
+- Flying to the pose you're already at just turns, with no out-and-back.
+- Flights from Top view head for the destination's side instead of +X.
+
+Seat-shadow waste: seats no longer cast shadows or trigger shadow-map re-renders (nothing inside the shell reads
+the live shadow).
+
+Final 9 views (`v3f_*`): day 1.00 / 0.98 / 0.96, golden 0.99 / 0.96 / 0.88, night 0.85 / **0.86** / 0.82 (Aerial_Dusk,
+Approach, Seat_212). Roof glow 3.73 % (Cycles 3.44 %). Popping 0.0055.
+
+Deferred minors:
+- The mirror pass uses the main camera's view-space sun direction, so N·L is slightly wrong in the reflection by day.
+- The first time the reflection turns on, the global clipping plane recompiles all shaders (a one-off hitch).
+- The noise octaves are faded, not skipped (cost).
+- `denoise_lm.py`: the dilation wraps at image borders; black chart texels are treated as gutter.
+- `seatRows()` is a dead stub.

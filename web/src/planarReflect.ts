@@ -23,6 +23,11 @@ export const isPlanarMaterial = (name: string) => PLANAR_RE.test(name);
 /** Worth rendering: the eye is outside the bowl and low enough to see the plaza at a glancing angle. */
 export const reflectionActive = (eyeB: V3) => eyeB[2] < PLANAR.maxEyeZ && !isInside(eyeB);
 
+/** Objects only seen inside the bowl (seats, section patches, highlight): the main camera renders this layer too, the mirror pass does not. */
+export const BOWL_LAYER = 1;
+/** Also main-camera only: trees and the far site, too costly to draw twice for a reflection seen at a glancing angle. */
+export const NO_REFLECT_LAYER = 2;
+
 export interface PlanarUniforms { tReflect: { value: THREE.Texture }; uReflectMatrix: { value: THREE.Matrix4 }; uReflectOn: { value: number } }
 
 /** GLSL (with PARS): the mirror image at this fragment, box-blurred with the surface roughness. */
@@ -53,6 +58,7 @@ export class PlazaReflection {
   private size = new THREE.Vector2();
   private v = new THREE.Vector3();
   constructor() {
+    this.cam.layers.set(0);
     this.dummy.needsUpdate = true;
     this.uniforms = { tReflect: { value: this.dummy }, uReflectMatrix: { value: new THREE.Matrix4() }, uReflectOn: { value: 0 } };
   }
@@ -75,6 +81,7 @@ export class PlazaReflection {
     c.lookAt(look);
     c.projectionMatrix.copy(camera.projectionMatrix);
     c.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
+    c.layers.set(0);                                   // c.copy(camera) copied its layers; drop the bowl-only one
     c.updateMatrixWorld();
     this.uniforms.uReflectMatrix.value.copy(this.bias).multiply(c.projectionMatrix).multiply(c.matrixWorldInverse);
     // the plaza must not sample the target being rendered

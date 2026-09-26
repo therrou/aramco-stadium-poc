@@ -69,25 +69,11 @@ def _podium_edge(phi):
 
 
 # Lightwells cut through the deck down to the shopping level, flanking the sign
-# (refs/v4/announcement.jpg): triangles in (azimuth deg, fraction wall -> edge).
+# (refs/v4/announcement.jpg): triangles in (azimuth deg, fraction wall -> edge), rounded in plan.
 VOIDS = [((225.0, 0.30), (230.5, 0.80), (211.0, 0.74)),
          ((247.0, 0.30), (241.5, 0.80), (261.0, 0.74))]
+VOID_CORNER_R = 3.0      # plan radius of the lightwells' rounded corners (m)
 DECK_RINGS = 24
-
-
-def _in_tri(p, tri):
-    (x1, y1), (x2, y2), (x3, y3) = tri
-    d1 = (p[0] - x2) * (y1 - y2) - (x1 - x2) * (p[1] - y2)
-    d2 = (p[0] - x3) * (y2 - y3) - (x2 - x3) * (p[1] - y3)
-    d3 = (p[0] - x1) * (y3 - y1) - (x3 - x1) * (p[1] - y1)
-    neg = d1 < 0 or d2 < 0 or d3 < 0
-    pos = d1 > 0 or d2 > 0 or d3 > 0
-    return not (neg and pos)
-
-
-def in_void(deg, f):
-    deg = deg % 360
-    return any(_in_tri((deg, f), tri) for tri in VOIDS)
 
 
 def _proud(a, b_, off=0.03):
@@ -98,32 +84,112 @@ def _proud(a, b_, off=0.03):
     return (a[0] + nx, a[1] + ny), (b_[0] + nx, b_[1] + ny)
 
 
-def _podium(coll, paving, under, glass, steel):
-    """Level 2: the wide elevated plaza the shell lands on. Radial rings so the
-    lightwells can be cut out; level 1 (shops, columns) sits underneath."""
-    n, R = 720, DECK_RINGS
+def rounded_polygon(corners, radius, seg=8):
+    """Convex polygon with its corners filleted (radius m), counter-clockwise, as a list of (x, y)."""
+    c = [tuple(p) for p in corners]
+    area = sum(c[i][0] * c[(i + 1) % len(c)][1] - c[(i + 1) % len(c)][0] * c[i][1] for i in range(len(c)))
+    if area < 0:
+        c.reverse()
+    out = []
+    for i in range(len(c)):
+        p0, p1, p2 = c[i - 1], c[i], c[(i + 1) % len(c)]
+        ax, ay = p0[0] - p1[0], p0[1] - p1[1]
+        bx, by = p2[0] - p1[0], p2[1] - p1[1]
+        la, lb = math.hypot(ax, ay), math.hypot(bx, by)
+        ax, ay, bx, by = ax / la, ay / la, bx / lb, by / lb
+        ang = math.acos(max(-1.0, min(1.0, ax * bx + ay * by)))
+        d = min(radius / math.tan(ang / 2), 0.45 * la, 0.45 * lb)
+        r = d * math.tan(ang / 2)
+        t0 = (p1[0] + ax * d, p1[1] + ay * d)
+        t1 = (p1[0] + bx * d, p1[1] + by * d)
+        hx, hy = ax + bx, ay + by
+        hl = math.hypot(hx, hy) or 1.0
+        k = r / math.sin(ang / 2)
+        cx, cy = p1[0] + hx / hl * k, p1[1] + hy / hl * k
+        a0, a1 = math.atan2(t0[1] - cy, t0[0] - cx), math.atan2(t1[1] - cy, t1[0] - cx)
+        while a1 < a0:
+            a1 += 2 * math.pi
+        if a1 - a0 > math.pi:
+            a1 -= 2 * math.pi
+        for j in range(seg + 1):
+            a = a0 + (a1 - a0) * j / seg
+            out.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    return out
+
+
+def in_polygon(p, poly):
+    c, j = False, len(poly) - 1
+    for i in range(len(poly)):
+        (xi, yi), (xj, yj) = poly[i], poly[j]
+        if (yi > p[1]) != (yj > p[1]) and p[0] < (xj - xi) * (p[1] - yi) / (yj - yi + 1e-12) + xi:
+            c = not c
+        j = i
+    return c
+
+
+def _deck_frame(n, R):
+    """(pt, edge, ins, inner, step): exact plan points on the deck grid; pt(i, r) takes float i and r."""
     lay = bowl.layout()
     plan = bowl.Plan()
     up = lay["Upper"]
     d_wall = up[-1][0] + up[-1][2] + 1.2 + 7.0
     inner = C.offset_loop(plan.pts, plan.nrm, d_wall)
     step = len(inner) / n
-    top, bot = P.PODIUM_Z, P.PODIUM_Z - 1.4
     edge = [_podium_edge(2 * math.pi * i / n) for i in range(n)]
     ins = [inner[int(i * step)] for i in range(n)]
 
     def pt(i, r):
-        i = int(round(i)) % n
+        i0 = math.floor(i)
+        t = i - i0
+        a, b_ = i0 % n, (i0 + 1) % n
+        ix, iy = ins[a][0] + (ins[b_][0] - ins[a][0]) * t, ins[a][1] + (ins[b_][1] - ins[a][1]) * t
+        ex, ey = edge[a][0] + (edge[b_][0] - edge[a][0]) * t, edge[a][1] + (edge[b_][1] - edge[a][1]) * t
         f = r / R
-        return (ins[i][0] + (edge[i][0] - ins[i][0]) * f, ins[i][1] + (edge[i][1] - ins[i][1]) * f)
+        return (ix + (ex - ix) * f, iy + (ey - iy) * f)
+    return pt, edge, inner, step
 
-    solid = [[not in_void(360.0 * (i + 0.5) / n, (r + 0.5) / R) for r in range(R)] for i in range(n)]
+
+def void_polygons(pt, n, R):
+    """The lightwells in plan: rounded triangles, corners from VOIDS (deg, f)."""
+    return [rounded_polygon([pt(d / 360 * n, f * R) for d, f in tri], VOID_CORNER_R) for tri in VOIDS]
+
+
+def _cut_voids(bm, polys, margin=3.0):
+    """Split the deck exactly along each lightwell outline (bisect by each edge's vertical plane, only
+    near that edge), then delete the faces inside: smooth rims instead of grid steps."""
+    import bmesh
+    from mathutils import Vector
+    for poly in polys:
+        for i in range(len(poly)):
+            (x0, y0), (x1, y1) = poly[i], poly[(i + 1) % len(poly)]
+            lo_x, hi_x = min(x0, x1) - margin, max(x0, x1) + margin
+            lo_y, hi_y = min(y0, y1) - margin, max(y0, y1) + margin
+            faces = [f for f in bm.faces if any(lo_x <= v.co.x <= hi_x and lo_y <= v.co.y <= hi_y for v in f.verts)]
+            if not faces:
+                continue
+            edges = list({e for f in faces for e in f.edges})
+            verts = list({v for f in faces for v in f.verts})
+            dx, dy = x1 - x0, y1 - y0
+            bmesh.ops.bisect_plane(bm, geom=faces + edges + verts, dist=1e-4,
+                                   plane_co=Vector((x0, y0, 0.0)), plane_no=Vector((dy, -dx, 0.0)).normalized())
+    dead = [f for f in bm.faces if any(in_polygon(tuple(f.calc_center_median())[:2], poly) for poly in polys)]
+    bmesh.ops.delete(bm, geom=dead, context="FACES")
+
+
+def _podium(coll, paving, under, glass, steel):
+    """Level 2: the wide elevated plaza the shell lands on, with two smooth lightwells cut
+    through it; level 1 (shops, columns) sits underneath."""
+    import bmesh
+    n, R = 720, DECK_RINGS
+    pt, edge, inner, step = _deck_frame(n, R)
+    top, bot = P.PODIUM_Z, P.PODIUM_Z - 1.4
+    polys = void_polygons(pt, n, R)
     verts, faces, mids = [], [], []
     gv, gf = [], []
     lv, lf = [], []
 
     def glow(a, b_):
-        """Thin lit band just proud of a fascia, near its top (outward = away from the cell)."""
+        """Thin lit band just proud of a fascia, near its top."""
         k = len(lv)
         lv.extend([(*a, top - 0.38), (*b_, top - 0.38), (*b_, top - 0.18), (*a, top - 0.18)])
         lf.append((k, k + 1, k + 2, k + 3))
@@ -141,11 +207,11 @@ def _podium(coll, paving, under, glass, steel):
         gv.extend([(*a, top), (*b_, top), (*b_, top + 1.15), (*a, top + 1.15)])
         gf.append((k, k + 1, k + 2, k + 3))
 
+    # the full grid, top (paving) and soffit, then the lightwells cut out exactly
+    grid = [[pt(i, r) for r in range(R + 1)] for i in range(n)]
     for i in range(n):
         for r in range(R):
-            if not solid[i][r]:
-                continue
-            p00, p10, p11, p01 = pt(i, r), pt(i + 1, r), pt(i + 1, r + 1), pt(i, r + 1)
+            p00, p10, p11, p01 = grid[i][r], grid[(i + 1) % n][r], grid[(i + 1) % n][r + 1], grid[i][r + 1]
             k = len(verts)
             verts.extend([(*p00, top), (*p10, top), (*p11, top), (*p01, top)])
             faces.append((k, k + 1, k + 2, k + 3))
@@ -154,21 +220,26 @@ def _podium(coll, paving, under, glass, steel):
             verts.extend([(*p00, bot), (*p01, bot), (*p11, bot), (*p10, bot)])
             faces.append((k, k + 1, k + 2, k + 3))
             mids.append(1)
-            if r == R - 1:
-                quad(p01, p11, bot, top, 1)                 # outer fascia
-            if r == 0:
-                quad(p10, p00, bot, top, 1)                 # against the concourse
-            # lightwell rims: wall + glass balustrade where a neighbour is cut away
-            # (rail segments run so their right-hand side faces the void)
-            if r > 0 and not solid[i][r - 1]:
-                quad(p00, p10, bot, top, 1); rail(p10, p00)
-            if r < R - 1 and not solid[i][r + 1]:
-                quad(p11, p01, bot, top, 1); rail(p01, p11)
-            if not solid[(i - 1) % n][r]:
-                quad(p01, p00, bot, top, 1); rail(p00, p01)
-            if not solid[(i + 1) % n][r]:
-                quad(p10, p11, bot, top, 1); rail(p11, p10)
+    for i in range(n):
+        quad(grid[i][R], grid[(i + 1) % n][R], bot, top, 1)    # outer fascia
+        quad(grid[(i + 1) % n][0], grid[i][0], bot, top, 1)    # against the concourse
     deck = C.mesh_object("Podium_Deck", verts, faces, coll, [paving, under], mat_indices=mids)
+    bm = bmesh.new()
+    bm.from_mesh(deck.data)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-4)
+    _cut_voids(bm, polys)
+    bm.to_mesh(deck.data)
+    bm.free()
+    # lightwell rims: wall, glass balustrade and lit line along the smooth outline (CCW: void on the left)
+    wv, wf = [], []
+    for poly in polys:
+        for i in range(len(poly)):
+            a, b_ = poly[i], poly[(i + 1) % len(poly)]
+            k = len(wv)
+            wv.extend([(*a, bot), (*b_, bot), (*b_, top), (*a, top)])
+            wf.append((k, k + 1, k + 2, k + 3))
+            rail(b_, a)                                   # right-hand side (the glow) faces the void
+    C.mesh_object("Podium_WellWalls", wv, wf, coll, [under])
     # glass balustrade + lit line on the outer edge
     for i in range(n):
         rail(edge[i], edge[(i + 1) % n])
@@ -181,9 +252,9 @@ def _podium(coll, paving, under, glass, steel):
     cv, ce = [], []
     for f in (0.36, 0.64, 0.9):
         for i in range(0, n, 10):
-            if in_void(360.0 * i / n, f):
-                continue
             x, y = pt(i, f * R)
+            if any(in_polygon((x, y), poly) for poly in polys):
+                continue
             cv += [(x, y, 0.0), (x, y, bot)]
             ce.append((len(cv) - 2, len(cv) - 1))
     cols = C.mesh_object("Podium_Columns", cv, [], coll, edges=ce)
@@ -201,7 +272,6 @@ def _podium(coll, paving, under, glass, steel):
         a, b = 2 * i, 2 * ((i + 1) % n)
         lf.append((a, a + 1, b + 1, b))
     C.mesh_object("Podium_LightStrip", lv, lf, coll, [bpy.data.materials["M_PodiumStrip"]])
-
 
 
 def _void_stairs(coll, paving, under, pt, n, R, top):
@@ -504,6 +574,11 @@ def _lit_windows(mat):
     s = C.math_node(nt, "MULTIPLY", lit, C.math_node(nt, "MULTIPLY", C.night_node(nt), 0.3))
     b.inputs["Emission Color"].default_value = (1.0, 0.72, 0.42, 1)
     nt.links.new(s, b.inputs["Emission Strength"])
+
+
+# Palm-lined entrance plaza (bearing, length, width). These lived only in the Blender session's module
+# globals and were never committed; recovered from the saved Entrance_Plaza mesh (v4).
+ENTRANCE_DEG, ENTRANCE_LEN, ENTRANCE_W = 262.0, 115.0, 56.0
 
 
 def _entrance_frame():

@@ -243,6 +243,14 @@ export function toCoatedSail(m: THREE.MeshStandardMaterial) {
 /** v4 team dugouts: canopy glass (pitch.py _dugouts). */
 export const DUGOUT_GLASS_RE = /^M_DugoutGlass\b/;
 export const DUGOUT_GLASS = { opacity: 0.4, env: 1.0, lmBoost: 3.0, milk: [0.72, 0.78, 0.8] as [number, number, number], emDay: 0.45, emNight: 0.06 } as const;
+/**
+ * v4 (user: the sign glowed unevenly at night): the letters' faces fall into three lightmap groups by position
+ * and height (site, site_near, site_mid), baked at different densities, and their own 14x night emission was
+ * baked into those maps and bloomed. The sign lights itself evenly instead: the baked light is mostly ignored
+ * and a moderate, uniform emission carries it (day keeps a little so the white reads under the sun).
+ */
+export const SIGN_RE = /^M_SignWhite\b/;
+export const SIGN = { lm: 0.25, emDay: 0.55, emNight: 2.4 } as const;
 /** v4: city blocks (site.py _city, lit windows). */
 export const CITY_RE = /^M_Building\d/;
 /** v4 LED ribbons on the tier fronts (signage.py). */
@@ -350,6 +358,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
       mat.roughness = 0.7;
       mat.envMapIntensity = 0.1;                    // the glossy face mirrored the golden sky over the picture
     }
+    if (SIGN_RE.test(mat.name)) { ex.emDay = SIGN.emDay; ex.emNight = SIGN.emNight; mat.emissive.setRGB(1, 1, 1); }
     if (CITY_RE.test(mat.name)) ex.emLate = true;          // v4: city windows light up only toward night
     if (RIBBON_RE.test(mat.name) && ribbonTexture.value) mat.emissiveMap = ribbonTexture.value;   // v4: sponsor ads, not the placeholder
     if (DUGOUT_GLASS_RE.test(mat.name)) {            // v4: the canopy sheet faces down, so its bake is the shaded underside
@@ -369,7 +378,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
       mat.side = THREE.FrontSide;
     }
     mat.userData.lmB = { value: null as THREE.Texture | null };
-    mat.lightMapIntensity = Math.PI * (DUGOUT_GLASS_RE.test(mat.name) ? DUGOUT_GLASS.lmBoost : 1);   // Cycles diffuse bake is E/π; three multiplies by albedo/π
+    mat.lightMapIntensity = Math.PI * (DUGOUT_GLASS_RE.test(mat.name) ? DUGOUT_GLASS.lmBoost : SIGN_RE.test(mat.name) ? SIGN.lm : 1);   // Cycles diffuse bake is E/π; three multiplies by albedo/π
     const env = envIntensityOf(mat.name);
     if (env !== undefined) mat.envMapIntensity = env;
     if (OVERLAY_RE.test(mat.name)) {

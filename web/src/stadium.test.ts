@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import * as THREE from "three";
 import { BLOOM } from "./lighting";
 import { BOARDS, LED_EMISSIVE_GLSL } from "./ledBoards";
-import { PARS, sailGlow, PAVING_LIFT_M, PAVING_LIFT_RE, DUGOUT_GLASS, DUGOUT_GLASS_RE, FLOOD_LENS_MAX, LED_CELL, LED_COVER, LED_GLSL, LED_MAX, LED_R, setupStadiumMaterials } from "./stadium";
+import { PARS, SIGN, SIGN_RE, sailGlow, PAVING_LIFT_M, PAVING_LIFT_RE, DUGOUT_GLASS, DUGOUT_GLASS_RE, FLOOD_LENS_MAX, LED_CELL, LED_COVER, LED_GLSL, LED_MAX, LED_R, setupStadiumMaterials } from "./stadium";
 import { splitByGroup, GROUND_ENV, OVERLAY_RE, SAIL_NIGHT_ENV, SAIL_RE, envIntensityOf, sailEnvIntensity, SAIL_COAT, SPEC_OCC, SAIL_NIGHT_E, lightsChunkFor, overlayOffset, soMinDefine, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
 
 it("patches three r186 lights_fragment_maps (lightmap blend, no diffuse IBL, env blend)", () => {
@@ -177,4 +177,10 @@ it("v4: lightmaps decode as gamma RGB when the manifest sets lmGamma, RGBM other
   const pars = PARS;
   expect(pars).toContain("uniform float uLmGamma;");
   expect(pars).toContain("pow( max( c.rgb, vec3( 0.0 ) ), vec3( uLmGamma ) ) * uRgbmRange");
+});
+
+it("v4: the sign lights itself evenly, well below its 14x bake emission", () => {
+  expect(SIGN_RE.test("M_SignWhite.web")).toBe(true);
+  expect(SIGN.emNight).toBeLessThan(4);
+  expect(SIGN.lm).toBeLessThan(0.5);
 });

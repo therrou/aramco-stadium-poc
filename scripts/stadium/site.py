@@ -588,6 +588,21 @@ def _entrance_frame():
     return ox, oy, ux, uy, -uy, ux             # origin, axis, side
 
 
+TREE_DECK_CLEAR = 7.0    # m beyond the level-2 deck edge kept free of trees (crowns ~5 m radius)
+
+
+def deck_outline(margin=0.0, n=720):
+    """The level-2 deck's outer edge (with its arms), pushed `margin` m outward, as a plan polygon.
+    v4: trees were kept out of an ellipse that the wider, superelliptic deck with arms outgrew, so
+    crowns came up through the deck at the diagonals, at the arms and at the entrance avenue."""
+    out = []
+    for i in range(n):
+        x, y = _podium_edge(2 * math.pi * i / n)
+        r = math.hypot(x, y)
+        out.append((x * (r + margin) / r, y * (r + margin) / r))
+    return out
+
+
 def _entrance_palm_rows():
     ox, oy, ux, uy, sx, sy = _entrance_frame()
     pts = []
@@ -695,9 +710,14 @@ def build(root):
     ex, ey, ux, uy, sx, sy = _entrance_frame()
     fx, fy, fr = FAN_ZONE
 
+    deck = deck_outline(TREE_DECK_CLEAR)
+
+    def under_deck(x, y):
+        return in_polygon((x, y), deck)
+
     def blocked(x, y):
         e = (x / (P.SHELL_A + P.PODIUM_WIDTH + 6)) ** 2 + (y / (P.SHELL_B + P.PODIUM_WIDTH + 6)) ** 2
-        if e < 1.0 or L.ring_distance(x, y) < L.RING_W / 2 + 3:
+        if e < 1.0 or under_deck(x, y) or L.ring_distance(x, y) < L.RING_W / 2 + 3:
             return True
         if L.in_lot(x, y, 2.0) or road_distance(x, y) < 6:
             return True
@@ -717,7 +737,8 @@ def build(root):
 
     park = bpy.data.objects["Park_Lawn"].data
     poly = [(v.co.x, v.co.y) for v in park.vertices[:len(park.vertices) // 2]]
-    ntrees = L.scatter_trees(coll, poly, blocked, island_trees, _entrance_palm_rows())
+    ntrees = L.scatter_trees(coll, poly, blocked, [p for p in island_trees if not under_deck(*p)],
+                             [p for p in _entrance_palm_rows() if not under_deck(*p)])
 
     rng = random.Random(21)
 

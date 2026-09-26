@@ -23,3 +23,12 @@ def test_site_near_split():
     assert list(groups.site_split("bowl", "M_Concrete", [True], [10.0])) == ["bowl"]
     assert list(groups.site_split("site", "M_Car3", [True], [10.0])) == ["site"]
     assert "site_near" in groups.TEXELS_PER_M and "site_near" in groups.ALBEDO_TEXELS_PER_M
+
+
+def test_site_mid_split():
+    # flat ground 300-450 m and raised structures (bridges, canopies) within 700 m go to site_mid
+    out = groups.site_split("site", "M_Paving", [True, True, False, False, True],
+                            [120.0, 400.0, 600.0, 900.0, 500.0], [0.0, 0.0, 9.0, 9.0, 0.0])
+    assert list(out) == ["site_near", "site_mid", "site_mid", "site", "site"]
+    assert list(groups.site_split("site", "M_Building1", [False], [600.0], [10.0])) == ["site"]
+    assert "site_mid" in groups.TEXELS_PER_M and groups.ATLAS_LO["site_mid"] == 2048

@@ -171,21 +171,22 @@ def _cut_flat(bm, cell):
 
 
 def _split_near(bm, mname):
-    """[(group, material, bmesh)]: flat faces near the stadium go to "site_near" (groups.site_split)."""
+    """[(group, material, bmesh)]: site faces go to "site_near", "site_mid" or stay "site" (groups.site_split)."""
     import numpy as np
     from . import uvpack
     faces, n, c = _face_arrays(bm)
-    g = groups.site_split("site", mname, n[:, 2] > uvpack.FLAT_NZ, np.hypot(c[:, 0], c[:, 1]))
-    near = g == "site_near"
-    if not near.any():
-        return [("site", mname, bm)]
-    if near.all():
-        return [("site_near", mname, bm)]
-    far = bm.copy()
-    far.faces.ensure_lookup_table()
-    bmesh.ops.delete(far, geom=[far.faces[i] for i in np.nonzero(near)[0]], context="FACES")
-    bmesh.ops.delete(bm, geom=[f for f, k in zip(faces, near) if not k], context="FACES")
-    return [("site_near", mname, bm), ("site", mname, far)]
+    g = groups.site_split("site", mname, n[:, 2] > uvpack.FLAT_NZ, np.hypot(c[:, 0], c[:, 1]), c[:, 2])
+    names = [k for k in ("site_near", "site_mid", "site") if (g == k).any()]
+    if len(names) == 1:
+        return [(names[0], mname, bm)]
+    out = []
+    for k in names:
+        part = bm.copy()
+        part.faces.ensure_lookup_table()
+        bmesh.ops.delete(part, geom=[part.faces[i] for i in np.nonzero(g != k)[0]], context="FACES")
+        out.append((k, mname, part))
+    bm.free()
+    return out
 
 
 def planar_uv(obj, tile):

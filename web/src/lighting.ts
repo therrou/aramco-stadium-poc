@@ -4,7 +4,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { ENV_ROTATION_Y, toThree } from "./coords";
-import { LightingTransition, emissionStrength, envSizeMismatch, exposure, sunColor, sunStrength, sunToward } from "./lightingState";
+import { lateEmission, LightingTransition, emissionStrength, envSizeMismatch, exposure, sunColor, sunStrength, sunToward } from "./lightingState";
 import { STATES, type Assets, type State } from "./loader";
 import { Sky } from "./background";
 import { SAIL_RE, sailEnvIntensity, specOccK, type SharedUniforms } from "./stadium";
@@ -133,7 +133,8 @@ export class Lighting {
     this.shared.uSoK.value = specOccK(n);
     for (const m of this.sails) m.envMapIntensity = sailEnvIntensity(n);
     this.sky.setBlend(e);
-    for (const m of this.emissive) m.emissiveIntensity = emissionStrength(m.userData.emDay ?? 0, m.userData.emNight ?? 0, n);
+    for (const m of this.emissive)
+      m.emissiveIntensity = emissionStrength(m.userData.emDay ?? 0, m.userData.emNight ?? 0, n) * (m.userData.emLate ? lateEmission(n) : 1);
     this.renderer.toneMappingExposure = exposure(n, cameraExposure);
     if (!this.hasLightmaps) clearTreeUniforms(this.outdoor);
     else if (camera) { camera.updateMatrixWorld(); updateTreeUniforms(this.outdoor, n, camera); }

@@ -201,13 +201,60 @@ CANOPIES = [  # (cx, cy, length, width, rotation, height)
 ]
 
 
-def canopies(coll, steel):
+CANOPY_CLEAR_M = 9.0   # rim to bridge centreline: half the 11 m deck plus margin
+
+
+def _canopy_rim(cx, cy, L, W, rot, k, n=36):
+    c, s = math.cos(rot), math.sin(rot)
+    pts = []
+    for i in range(n):
+        a = 2 * math.pi * i / n
+        wob = 1 + 0.12 * math.sin(2 * a + k) + 0.08 * math.sin(3 * a)
+        lx = L / 2 * math.cos(a) * wob
+        ly = W / 2 * math.sin(a) * wob * (1 - 0.35 * math.cos(a) ** 2)
+        pts.append((cx + lx * c - ly * s, cy + lx * s + ly * c))
+    return pts
+
+
+def _inside(p, poly):
+    c, j = False, len(poly) - 1
+    for i in range(len(poly)):
+        (xi, yi), (xj, yj) = poly[i], poly[j]
+        if (yi > p[1]) != (yj > p[1]) and p[0] < (xj - xi) * (p[1] - yi) / (yj - yi + 1e-12) + xi:
+            c = not c
+        j = i
+    return c
+
+
+def clear_of_paths(cx, cy, L, W, rot, k, paths, clear=CANOPY_CLEAR_M, step=1.5, tries=80):
+    """Canopy centre pushed away from the bridge paths until no path point lies inside its rim or within
+    `clear` metres of it (v4: the SW and SE bridges ran through canopies and shadowed themselves in the bake).
+    The push is from the nearest path point to the canopy centre, so a bridge crossing the middle does not
+    make opposite rim points cancel out."""
+    pts = [(x, y) for path in paths for x, y, _ in path]
+    if not pts:
+        return cx, cy
+    for _ in range(tries):
+        rim = _canopy_rim(cx, cy, L, W, rot, k)
+        clash = any(_inside(p, rim) or min(math.hypot(p[0] - rx, p[1] - ry) for rx, ry in rim) < clear
+                    for p in pts if math.hypot(p[0] - cx, p[1] - cy) < L / 2 + clear + 2)
+        if not clash:
+            return cx, cy
+        px, py = min(pts, key=lambda p: math.hypot(p[0] - cx, p[1] - cy))
+        dx, dy = cx - px, cy - py
+        ln = math.hypot(dx, dy) or 1.0
+        cx, cy = cx + dx / ln * step, cy + dy / ln * step
+    return cx, cy
+
+
+def canopies(coll, steel, paths=()):
     mat = C.principled("M_Canopy", (0.93, 0.93, 0.9), rough=0.4)
     C.night_emission(mat, (1.0, 0.92, 0.8), 0.0, 0.5)
     b = C.bsdf_of(mat)
     b.inputs["Transmission Weight"].default_value = 0.15
     col_v, col_e = [], []
     for k, (cx, cy, L, W, rot, h) in enumerate(CANOPIES):
+        cx, cy = clear_of_paths(cx, cy, L, W, rot, k, paths)
         n, rings = 72, 6
         c, s = math.cos(rot), math.sin(rot)
         verts, faces = [], []

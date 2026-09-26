@@ -690,7 +690,7 @@ def build(root):
     nbld = _city(coll)
     _entrance_plaza(coll, paving)
     _fan_zone(coll, paving)
-    L.canopies(coll, steel)
+    L.canopies(coll, steel, paths.values())
 
     ex, ey, ux, uy, sx, sy = _entrance_frame()
     fx, fy, fr = FAN_ZONE

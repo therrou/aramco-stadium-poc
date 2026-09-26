@@ -21,7 +21,7 @@ def total_mb(root):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("root")
-    ap.add_argument("--limit", type=float, default=46.0)
+    ap.add_argument("--limit", type=float, default=50.0)
     a = ap.parse_args(argv)
     total, rows = total_mb(a.root)
     for name, size in rows[:15]:

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LightingTransition, exposure, emissionStrength, sunToward, sunStrength } from "./lightingState";
+import { LightingTransition, exposure, emissionStrength, lateEmission, sunToward, sunStrength } from "./lightingState";
 
 describe("transitions (Review Focus 1)", () => {
   it("reaches the target in ~1 s", () => {
@@ -100,4 +100,11 @@ describe("env size check (fix round 1)", () => {
   it("different size -> message naming the sizes", () => {
     expect(envSizeMismatch([{ width: 1024, height: 512 }, { width: 2048, height: 1024 }, { width: 1024, height: 512 }])).toMatch(/2048x1024/);
   });
+});
+
+it("v4: city windows fade in only toward night", () => {
+  expect(lateEmission(0)).toBe(0);
+  expect(lateEmission(0.6)).toBe(0);      // golden hour: off
+  expect(lateEmission(1)).toBe(1);
+  expect(lateEmission(0.8)).toBeCloseTo(0.5, 5);
 });

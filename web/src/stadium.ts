@@ -241,6 +241,8 @@ export function toCoatedSail(m: THREE.MeshStandardMaterial) {
 /** v4 team dugouts: canopy glass (pitch.py _dugouts). */
 export const DUGOUT_GLASS_RE = /^M_DugoutGlass\b/;
 export const DUGOUT_GLASS = { opacity: 0.4, env: 1.0, lmBoost: 3.0, milk: [0.72, 0.78, 0.8] as [number, number, number], emDay: 0.45, emNight: 0.06 } as const;
+/** v4: city blocks (site.py _city, lit windows). */
+export const CITY_RE = /^M_Building\d/;
 /** v4 LED ribbons on the tier fronts (signage.py). */
 export const RIBBON_RE = /^M_FasciaLED\b/;
 export const FLOOD_LENS_RE = /^M_FloodLens\b/;
@@ -328,7 +330,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
     seen.add(mat);
     const group = groupOf(o);
     const lines = useLightmaps && lineCharts !== null && group === "pitch" && PITCH_LINES_RE.test(mat.name);
-    const ex = mat.userData as { emDay?: number; emNight?: number; special?: string; tint?: number[] };
+    const ex = mat.userData as { emDay?: number; emNight?: number; special?: string; tint?: number[]; emLate?: boolean };
     const detail = detailFor(mat.name);
     const planar = useLightmaps && isPlanarMaterial(mat.name);
     const led = isLedBoard(mat.name);
@@ -340,6 +342,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
       mat.roughness = 0.6;
       mat.envMapIntensity = 0.12;                   // the sky's sheen on the glossy face washed the ad out
     }
+    if (CITY_RE.test(mat.name)) ex.emLate = true;          // v4: city windows light up only toward night
     if (RIBBON_RE.test(mat.name) && ribbonTexture.value) mat.emissiveMap = ribbonTexture.value;   // v4: sponsor ads, not the placeholder
     if (DUGOUT_GLASS_RE.test(mat.name)) {            // v4: the canopy sheet faces down, so its bake is the shaded underside
       mat.opacity = DUGOUT_GLASS.opacity;           // (dark); Cycles shows clear glass lit by the sky: thin it, mirror the sky

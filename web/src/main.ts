@@ -129,7 +129,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   camera.layers.enable(NO_REFLECT_LAYER);
   a.stadium.scene.traverse((o) => {
     if (!(o as THREE.Mesh).isMesh) return;
-    if (o.name.startsWith("site__")) o.layers.set(NO_REFLECT_LAYER);
+    if (o.name.startsWith("site__") || o.name.startsWith("site_mid__")) o.layers.set(NO_REFLECT_LAYER);   // v4: site_mid as the far site
     else if (/^(bowl|pitch)__/.test(o.name)) o.layers.set(BOWL_LAYER);   // behind the shell in any plaza reflection
   });
   if (a.trees) {

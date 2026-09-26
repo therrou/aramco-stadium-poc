@@ -29,6 +29,15 @@ export class LightingTransition {
 /** lighting._render_settings: exposure = 0.25 + 0.5 n + camera["exposure"] (stops). */
 export const exposure = (n: number, e: number) => 2 ** (0.25 + 0.5 * n + e);
 export const emissionStrength = (d: number, nightS: number, n: number) => d + n * (nightS - d);
+/**
+ * v4 (user: the city blocks read as white speckles): the city's lit windows fade in only toward night (off by day
+ * and at golden hour, full at night), instead of the linear 60 % at golden hour.
+ */
+export const LATE_EMISSION = { from: 0.6, to: 1.0 } as const;
+export const lateEmission = (n: number) => {
+  const t = Math.min(Math.max((n - LATE_EMISSION.from) / (LATE_EMISSION.to - LATE_EMISSION.from), 0), 1);
+  return t * t * (3 - 2 * t);
+};
 
 const T = (n: number) => Math.min(n / 0.6, 1);
 /** Direction toward the sun (Blender), from lighting.SUN_ELEV_EXPR / SUN_AZ_EXPR / _sun_rotation. */

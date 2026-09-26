@@ -32,7 +32,7 @@ def _area(objs):
 CELL_M = {"site": 64.0}          # grid cell per group (default 16 m)
 # Task 13b: flat faces of the ground groups get planar top-down charts on this (coarser) grid; webscene
 # cut their faces on the same grid, so a road, lawn or plaza is one chart per cell, not one per face
-FLAT_CELL = {"site": groups.FLAT_CELL_M, "site_near": groups.FLAT_CELL_M, "pitch": groups.FLAT_CELL_M}
+FLAT_CELL = {"site": groups.FLAT_CELL_M, "site_near": groups.FLAT_CELL_M, "site_mid": groups.FLAT_CELL_M, "pitch": groups.FLAT_CELL_M}
 OVERLAP_TOLERANCE = 0.001        # max fraction of covered texels written twice (float32 edge rounding)
 
 

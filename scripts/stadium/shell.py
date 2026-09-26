@@ -10,6 +10,8 @@ lifted off the surface so it overlaps the next sail and leaves the lit vent gap.
 """
 import math
 
+import bpy
+
 from . import bowl
 from . import common as C
 from . import params as P
@@ -366,28 +368,102 @@ def _louvres(coll, steel):
     return d_back, loop, plan
 
 
-def _screens(coll, d_back, plan):
-    frame = C.principled("M_ScreenFrame", (0.78, 0.8, 0.8), rough=0.35, metal=0.6)   # light frame (interior ref)
-    scr = signage.screen_material()
-    loop = C.offset_loop(plan.pts, plan.nrm, d_back - 0.5)
+SCREEN_W, SCREEN_H = 30.0, 13.0   # m, ~2.3:1 like the key-visual screens
+SCREEN_CLEAR = 3.5                # m above the upper tier's back wall to the screen's bottom edge
+SCREEN_IN = 5.0                   # m in front of the louvre line (over the back rows), toward the pitch
+SCREEN_TILT = math.radians(10.0)  # face tilted down toward the pitch
+
+
+def _roof_bvh():
+    """BVH trees of the evaluated roof trusses and bracing (built before the screens)."""
+    from mathutils.bvhtree import BVHTree
+    dg = bpy.context.evaluated_depsgraph_get()
     out = []
-    for deg in (0, 50, 130, 180, 230, 310):
+    for name in ("Roof_Trusses", "Roof_Bracing"):
+        o = bpy.data.objects.get(name)
+        if o is None:
+            continue
+        ev = o.evaluated_get(dg)
+        me = ev.to_mesh()
+        vs = [ev.matrix_world @ v.co for v in me.vertices]
+        out.append(BVHTree.FromPolygons(vs, [p.vertices[:] for p in me.polygons]))
+        ev.to_mesh_clear()
+    return out
+
+
+def _clashes(bvhs, box, margin=0.6):
+    """True if the screen box (8 corners, grown by `margin` m) overlaps any of the roof BVHs."""
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    c = sum((Vector(p) for p in box), Vector()) / len(box)
+    grown = [tuple(c + (Vector(p) - c) * (1 + margin / max((Vector(p) - c).length, 1e-6))) for p in box]
+    faces = [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)]
+    t = BVHTree.FromPolygons(grown, faces)
+    return any(t.overlap(b) for b in bvhs)
+
+
+def _screens(coll, d_back, plan):
+    """Big screens hung from the roof in front of the louvre band, over the upper tier's back rows,
+    tilted toward the pitch, on hanger rods (refs: interior key visual). v4: they used to sit behind the
+    upper tier's back wall (z 23.5-37.5 m), half hidden from the stands."""
+    frame = C.principled("M_ScreenFrame", (0.78, 0.8, 0.8), rough=0.35, metal=0.6)   # light frame (interior ref)
+    steel = bpy.data.materials.get("M_Steel") or _steel_material()
+    scr = signage.screen_material()
+    up = bowl.layout()["Upper"]
+    loops = {k: C.offset_loop(plan.pts, plan.nrm, d_back - k) for k in (SCREEN_IN, SCREEN_IN + 4, SCREEN_IN + 8)}
+    out, rv, re_ = [], [], []
+    roof = _roof_bvh()
+
+    def place(deg, inward, clear, w, h):
         t = math.radians(deg)
         i = int(t / (2 * math.pi) * plan.n) % plan.n
-        x, y = loop[i]
+        x, y = loops[inward][i]
         nx, ny = plan.nrm[i]
         tx, ty = -ny, nx
-        w, h, zc = 34.0, 14.0, 30.5
+        rows = bowl.upper_rows_at(plan.angle(i))
+        top_z = up[max(0, min(int(rows), len(up)) - 1)][1] + 1.1          # back wall of the upper tier
+        zc = top_z + clear + h / 2 * math.cos(SCREEN_TILT)
         v = []
         for a, bb in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
-            v.append((x + tx * a * w / 2, y + ty * a * w / 2, zc + bb * h / 2))
+            out_ = bb * h / 2 * math.sin(SCREEN_TILT)                     # top leans back, face looks down
+            v.append((x + tx * a * w / 2 + nx * out_, y + ty * a * w / 2 + ny * out_,
+                      zc + bb * h / 2 * math.cos(SCREEN_TILT)))
         back = [(px + nx * 0.8, py + ny * 0.8, pz) for px, py, pz in v]
+        return v, back, (nx, ny, tx, ty)
+
+    for deg in (0, 50, 130, 180, 230, 310):
+        # slide along the bowl (up to 12 deg) until the screen box clears the roof trusses and bracing
+        # first fit, in order of preference: slide along the bowl (<= 6 deg), hang further in toward the pitch
+        # (the roof rises inward), a little lower, then smaller. Corners: trusses ~11 deg apart, screen ~16 deg.
+        found = None
+        for w, h in ((SCREEN_W, SCREEN_H), (SCREEN_W * 0.85, SCREEN_H * 0.85), (SCREEN_W * 0.7, SCREEN_H * 0.7)):
+            for clear in (SCREEN_CLEAR, 2.0):
+                for inward in loops:
+                    for off in [0] + [s_ * k * 0.5 for k in range(1, 13) for s_ in (1, -1)]:
+                        v, back, fr = place(deg + off, inward, clear, w, h)
+                        if not _clashes(roof, v + back):
+                            found = (v, back, fr, w)
+                            break
+                    if found: break
+                if found: break
+            if found: break
+        if found is None:
+            found = (*place(deg, SCREEN_IN, SCREEN_CLEAR, SCREEN_W, SCREEN_H)[:3], SCREEN_W)
+        v, back, (nx, ny, tx, ty), w = found
         verts = v + back
         faces = [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)]
         uv = [(1, 0), (1, 1), (0, 1), (0, 0)] + [(0, 0)] * 20   # read un-mirrored from the pitch
         obj = C.mesh_object(f"Screen_{deg}", verts, faces, coll, [scr, frame],
                             mat_indices=[0, 1, 1, 1, 1, 1], uvs=uv)
         out.append(obj.name)
+        # two hanger rods from the top edge up to the roof structure
+        for a in (-0.35, 0.35):
+            px, py, pz = back[3] if a < 0 else back[2]
+            px, py = px + tx * (-a) * w * 0.2, py + ty * (-a) * w * 0.2
+            rv += [(px, py, pz), (px, py, roof_z_at(px, py) - 1.5)]
+            re_.append((len(rv) - 2, len(rv) - 1))
+    rods = C.mesh_object("Screen_Hangers", rv, [], coll, edges=re_)
+    C.tube_modifier(rods, 0.12, steel, 6)
     return out
 
 

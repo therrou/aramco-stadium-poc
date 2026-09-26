@@ -4,7 +4,8 @@ import { STATE_NIGHT } from "./lightingState";
 import { SUN_VIS_GLSL } from "./sunShadow";
 import { PLANAR_GLSL, isPlanarMaterial } from "./planarReflect";
 import { BOARDS, LED_EMISSIVE_GLSL, LED_GLSL_BOARDS, isLedBoard, ledUniforms, ribbonTexture } from "./ledBoards";
-import { BICUBIC_GLSL, CONCRETE_GLSL, GRASS_GLSL, GROUND_GLSL, GROUND_MAP_GLSL, NET, NET_GLSL, detailFor } from "./detail";
+import { isScreen, screenTexture } from "./screens";
+import { BICUBIC_GLSL, CITY_GLSL, CONCRETE_GLSL, GRASS_GLSL, GROUND_GLSL, GROUND_MAP_GLSL, NET, NET_GLSL, detailFor } from "./detail";
 
 const LM_RE = /vec4 lightMapTexel = texture2D\( lightMap, vLightMapUv \);\s*vec3 lightMapIrradiance = lightMapTexel\.rgb \* lightMapIntensity;/;
 const IBL_IRR_RE = /iblIrradiance \+= getIBLIrradiance\( geometryNormal \);/;
@@ -86,11 +87,12 @@ export function patchLightsChunk(chunk: string) {
     .replace(COAT_RAD_RE, `clearcoatRadiance += mix( getIBLRadiance( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), getIBLRadianceB( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), uEnvBlend ) * lmSo;`);
 }
 
-const PARS = /* glsl */ `
-uniform sampler2D uLmB; uniform float uLmBlend; uniform float uRgbmRange;
+export const PARS = /* glsl */ `
+uniform sampler2D uLmB; uniform float uLmBlend; uniform float uRgbmRange; uniform float uLmGamma;
 uniform sampler2D uEnvB; uniform float uEnvBlend; uniform float uNight;
 varying vec3 vWorldPosB;
-vec3 rgbmDecode( vec4 c ) { return c.rgb * c.a * uRgbmRange; }
+// v4: lightmaps ship as gamma RGB (manifest lmGamma, webexport/rgbm.py); RGBM when uLmGamma is 0 (older assets)
+vec3 rgbmDecode( vec4 c ) { return uLmGamma > 0.0 ? pow( max( c.rgb, vec3( 0.0 ) ), vec3( uLmGamma ) ) * uRgbmRange : c.rgb * c.a * uRgbmRange; }
 uniform vec3 uSun; uniform vec3 uSunDirView; uniform vec3 uAmbient;   // S1: the sun and sky as in treeLight
 ${BICUBIC_GLSL}
 ${PLANAR_GLSL}
@@ -170,7 +172,7 @@ export interface SharedUniforms {
   uSun?: { value: THREE.Color }; uSunDirView?: { value: THREE.Vector3 }; uAmbient?: { value: THREE.Color };
   /** v3 option 2: the plaza's mirror image (planarReflect.ts); set by main.ts. */
   tReflect?: { value: THREE.Texture }; uReflectMatrix?: { value: THREE.Matrix4 }; uReflectOn?: { value: number };
-  uLmBlend: { value: number }; uEnvB: { value: THREE.Texture | null }; uEnvBlend: { value: number }; uRgbmRange: { value: number }; uNight: { value: number }; uSoK: { value: number } }
+  uLmBlend: { value: number }; uEnvB: { value: THREE.Texture | null }; uEnvBlend: { value: number }; uRgbmRange: { value: number }; uLmGamma: { value: number }; uNight: { value: number }; uSoK: { value: number } }
 /** Full uniform set seen by a stadium material: the shared ones plus its own second lightmap. */
 export interface LightingUniforms extends SharedUniforms { uLmB: { value: THREE.Texture | null } }
 
@@ -250,7 +252,7 @@ export const FLOOD_LENS_MAX = 30;
 
 /** Spec v3 part 2: the detail shaders (detail.ts) and what each does after the albedo map. */
 const FLAT_NORMAL_B = "vec3 nB = normalize( cross( dFdx( vWorldPosB ), dFdy( vWorldPosB ) ) );\n";
-const DETAIL_GLSL = { grass: GRASS_GLSL, net: NET_GLSL, concrete: CONCRETE_GLSL, ground: GROUND_GLSL, slab: GROUND_GLSL } as const;
+const DETAIL_GLSL = { grass: GRASS_GLSL, net: NET_GLSL, concrete: CONCRETE_GLSL, ground: GROUND_GLSL, slab: GROUND_GLSL, city: CITY_GLSL } as const;
 /** Light added after the lightmap (D5: the podium's night glow on the plaza). */
 const PODIUM_LIGHT = "irradiance += podiumGlow( vWorldPosB ) * uNight;";
 const DETAIL_LIGHT: Partial<Record<keyof typeof DETAIL_GLSL, string>> = { ground: PODIUM_LIGHT, slab: PODIUM_LIGHT };
@@ -260,6 +262,7 @@ const DETAIL_MAP = {
   concrete: FLAT_NORMAL_B + "diffuseColor.rgb *= concreteDetail( vWorldPosB, nB );",
   ground: GROUND_MAP_GLSL + "diffuseColor.rgb *= groundDetail( vWorldPosB );",
   slab: "diffuseColor.rgb *= mix( vec3( 1.0 ), groundDetail( vWorldPosB ), 0.5 );",
+  city: FLAT_NORMAL_B + "diffuseColor.rgb *= cityFacade( vWorldPosB, nB );",
 } as const;
 
 /** The lights chunk a stadium material compiles: patched or stock, the pitch lines' UVs, then any detail light. */
@@ -342,6 +345,11 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
       mat.roughness = 0.6;
       mat.envMapIntensity = 0.12;                   // the sky's sheen on the glossy face washed the ad out
     }
+    if (isScreen(mat.name)) {                        // v4: looping feed (screens.ts) on a matte LED face
+      if (screenTexture.value) mat.emissiveMap = screenTexture.value;
+      mat.roughness = 0.7;
+      mat.envMapIntensity = 0.1;                    // the glossy face mirrored the golden sky over the picture
+    }
     if (CITY_RE.test(mat.name)) ex.emLate = true;          // v4: city windows light up only toward night
     if (RIBBON_RE.test(mat.name) && ribbonTexture.value) mat.emissiveMap = ribbonTexture.value;   // v4: sponsor ads, not the placeholder
     if (DUGOUT_GLASS_RE.test(mat.name)) {            // v4: the canopy sheet faces down, so its bake is the shaded underside
@@ -384,6 +392,8 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
       if (detail) s.fragmentShader = s.fragmentShader
         .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + DETAIL_GLSL[detail])
         .replace("#include <map_fragment>", "#include <map_fragment>\n" + DETAIL_MAP[detail])
+      if (detail === "city") s.fragmentShader = s.fragmentShader     // v4: night window light only inside the windows
+        .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n{ " + FLAT_NORMAL_B + "totalEmissiveRadiance *= 0.3 + 2.2 * cityWindow( vWorldPosB, nB ); }");
       if (led) s.fragmentShader = s.fragmentShader
         .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n" + LED_EMISSIVE_GLSL);
       if (ex.special === "sailLeds")

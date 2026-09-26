@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import * as THREE from "three";
 import { BLOOM } from "./lighting";
 import { BOARDS, LED_EMISSIVE_GLSL } from "./ledBoards";
-import { sailGlow, PAVING_LIFT_M, PAVING_LIFT_RE, DUGOUT_GLASS, DUGOUT_GLASS_RE, FLOOD_LENS_MAX, LED_CELL, LED_COVER, LED_GLSL, LED_MAX, LED_R, setupStadiumMaterials } from "./stadium";
+import { PARS, sailGlow, PAVING_LIFT_M, PAVING_LIFT_RE, DUGOUT_GLASS, DUGOUT_GLASS_RE, FLOOD_LENS_MAX, LED_CELL, LED_COVER, LED_GLSL, LED_MAX, LED_R, setupStadiumMaterials } from "./stadium";
 import { splitByGroup, GROUND_ENV, OVERLAY_RE, SAIL_NIGHT_ENV, SAIL_RE, envIntensityOf, sailEnvIntensity, SAIL_COAT, SPEC_OCC, SAIL_NIGHT_E, lightsChunkFor, overlayOffset, soMinDefine, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
 
 it("patches three r186 lights_fragment_maps (lightmap blend, no diffuse IBL, env blend)", () => {
@@ -101,7 +101,7 @@ it("A4: flood lens night emission is capped and the lens is single-sided", () =>
   const other = new THREE.MeshStandardMaterial({ name: "M_Glow.web" });
   other.userData = { emDay: 0, emNight: 120 };
   root.add(new THREE.Mesh(new THREE.BufferGeometry(), lens), new THREE.Mesh(new THREE.BufferGeometry(), other));
-  const shared = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: 16 }, uNight: { value: 0 }, uSoK: { value: specOccK(0) } };
+  const shared = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: 16 }, uLmGamma: { value: 0 }, uNight: { value: 0 }, uSoK: { value: specOccK(0) } };
   setupStadiumMaterials(root, shared, false);
   expect(lens.userData.emNight).toBe(FLOOD_LENS_MAX);
   expect(lens.side).toBe(THREE.FrontSide);
@@ -129,7 +129,7 @@ it("v3: surface textures get anisotropic filtering (grazing ground showed moire 
   const root = new THREE.Group(), tex = new THREE.Texture(), nrm = new THREE.Texture();
   const m = new THREE.MeshStandardMaterial({ name: "M_Lawn.web", map: tex, normalMap: nrm });
   root.add(new THREE.Mesh(new THREE.BufferGeometry(), m));
-  const shared = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: 16 }, uNight: { value: 0 }, uSoK: { value: specOccK(0) } };
+  const shared = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: 16 }, uLmGamma: { value: 0 }, uNight: { value: 0 }, uSoK: { value: specOccK(0) } };
   setupStadiumMaterials(root, shared, false, false, 16);
   expect([tex.anisotropy, nrm.anisotropy]).toEqual([8, 8]);
 });
@@ -137,7 +137,7 @@ it("LED ad boards: lit by their ad (day and night strengths), black surface, own
   const root = new THREE.Group(), m = new THREE.MeshStandardMaterial({ name: "M_LEDBoard.web" });
   m.userData = { emDay: 0.3, emNight: 5 };
   root.add(new THREE.Mesh(new THREE.BufferGeometry(), m));
-  const shared = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: 16 }, uNight: { value: 0 }, uSoK: { value: specOccK(0) } };
+  const shared = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: 16 }, uLmGamma: { value: 0 }, uNight: { value: 0 }, uSoK: { value: specOccK(0) } };
   setupStadiumMaterials(root, shared, true);
   expect([m.userData.emDay, m.userData.emNight]).toEqual([BOARDS.emDay, BOARDS.emNight]);
   expect(m.emissive.getHex()).toBe(0xffffff);
@@ -169,4 +169,12 @@ it("v4: paving (not the plaza disc) is lifted over the coplanar lawn by more tha
   expect(PAVING_LIFT_RE.test("M_Lawn.web")).toBe(false);
   expect(PAVING_LIFT_M).toBeGreaterThan(0.04);
   expect(PAVING_LIFT_M).toBeLessThan(0.1);
+});
+
+it("v4: lightmaps decode as gamma RGB when the manifest sets lmGamma, RGBM otherwise", () => {
+  const chunk = THREE.ShaderChunk.lights_fragment_maps;
+  expect(patchLightsChunk(chunk)).toContain("rgbmDecode");
+  const pars = PARS;
+  expect(pars).toContain("uniform float uLmGamma;");
+  expect(pars).toContain("pow( max( c.rgb, vec3( 0.0 ) ), vec3( uLmGamma ) ) * uRgbmRange");
 });

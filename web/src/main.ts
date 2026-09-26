@@ -20,6 +20,7 @@ import { Lighting, makeComposer } from "./lighting";
 import { SunShadow } from "./sunShadow";
 import { BOWL_LAYER, NO_REFLECT_LAYER, PlazaReflection } from "./planarReflect";
 import { ledUniforms, makeAdAtlas } from "./ledBoards";
+import { makeScreenFeed, isScreen } from "./screens";
 import { missingLightmaps } from "./lightingState";
 import { setupTrees } from "./trees";
 import { heroesIn } from "./heroViews";
@@ -80,7 +81,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const camDef = camParam ? a.cameras[camParam] : undefined;
   rig.jump(camDef ? pivotOf(cameraPose(camDef)) : overview, camDef?.exposure ?? overviewExp);
   const camera = rig.camera;
-  const shared: SharedUniforms = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: a.manifest.rgbmRange }, uNight: { value: 0 }, uSoK: { value: specOccK(0) } };
+  const shared: SharedUniforms = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: a.manifest.rgbmRange }, uLmGamma: { value: a.manifest.lmGamma ?? 0 }, uNight: { value: 0 }, uSoK: { value: specOccK(0) } };
   // one "lightmaps present" flag for materials and Lighting: every state needs every group, else no lightmaps at all
   const glbGroups = new Set<string>();
   a.stadium.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh && typeof o.userData.lightmap === "string") glbGroups.add(o.userData.lightmap); });
@@ -89,6 +90,11 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   if (!useLightmaps && STATES.some((s) => Object.keys(a.lightmaps[s]).length > 0))
     console.warn(`Lighting: incomplete lightmap bake, using fallback lights. Missing: ${missing.join(", ")}`);
   ledUniforms.uAds.value = makeAdAtlas();              // pitch LED ad boards (aramco / AKQA)
+  const screenFeed = makeScreenFeed(() => (ledUniforms.uAds.value?.image as CanvasImageSource) ?? null);   // v4: looping screens
+  screenFeed.onSwap((t) => a.stadium.scene.traverse((o) => {
+    const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+    if (m && isScreen(m.name)) { m.emissiveMap = t; m.needsUpdate = true; }
+  }));
   const groups = setupStadiumMaterials(a.stadium.scene, shared, useLightmaps, renderer.capabilities.reversedDepthBuffer, renderer.capabilities.getMaxAnisotropy());
   const emissive = new Set<THREE.MeshStandardMaterial>();   // Set: the optimized glb shares materials between meshes
   a.stadium.scene.traverse((o) => {
@@ -252,6 +258,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     patches.setHidden(vis);
     highlight.update(now / 1000);
     ledUniforms.uAdTime.value += dt;
+    screenFeed.update(dt);
     lighting.update(dt, rig.exposure, camera);
     sun?.update(lighting.t.night);
     mirror?.update(renderer, scene, camera, toBlender(camera.position));

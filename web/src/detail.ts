@@ -147,7 +147,40 @@ export const GROUND_MAP_GLSL = /* glsl */ `
 #endif
 `;
 
-export type Detail = "grass" | "net" | "concrete" | "ground" | "slab";
+/**
+ * v4 (user: the city read as plain rectangles by day): procedural facades on the city blocks, no download.
+ * Vertical faces get a window grid (floors CITY.floor m, bays CITY.bay m) with dark glass, a lighter band per
+ * floor slab and a tint per block; roofs get a parapet ring and mottling. Once a pixel spans about a floor
+ * the grid fades to its mean, so distant blocks do not shimmer. cityWindow() also masks the night emission,
+ * so the baked lit-window light lands inside the windows.
+ */
+export const CITY = { floor: 3.3, bay: 3.8, glass: 0.42 } as const;
+export const CITY_GLSL = NOISE_GLSL + /* glsl */ `
+float cityWindow( vec3 pB, vec3 nB ) {
+  if ( abs( nB.z ) > 0.5 ) return 0.0;
+  float along = abs( nB.x ) > abs( nB.y ) ? pB.y : pB.x;
+  vec2 g = vec2( along / ${CITY.bay.toFixed(2)}, pB.z / ${CITY.floor.toFixed(2)} );
+  vec2 f = fract( g ), w = max( fwidth( g ), vec2( 1e-4 ) );
+  float wx = smoothstep( 0.16 - w.x, 0.16 + w.x, f.x ) * ( 1.0 - smoothstep( 0.84 - w.x, 0.84 + w.x, f.x ) );
+  float wy = smoothstep( 0.30 - w.y, 0.30 + w.y, f.y ) * ( 1.0 - smoothstep( 0.86 - w.y, 0.86 + w.y, f.y ) );
+  float fade = 1.0 - smoothstep( 0.35, 0.9, max( w.x, w.y ) );
+  float ground = step( ${CITY.floor.toFixed(2)}, pB.z );            // no windows on the plinth floor band
+  return mix( 0.68 * 0.56, wx * wy, fade ) * ground;
+}
+vec3 cityFacade( vec3 pB, vec3 nB ) {
+  vec2 blk = floor( pB.xy / 18.0 );
+  float tint = 0.9 + 0.2 * dHash( vec3( blk, 7.0 ) );
+  if ( abs( nB.z ) > 0.5 ) {                                          // roof: mottled, darker service patches
+    float m = dNoise( vec3( pB.xy * 0.35, 1.0 ) );
+    return vec3( tint * ( 0.86 + 0.14 * m ) );
+  }
+  float win = cityWindow( pB, nB );
+  vec3 glass = vec3( 0.55, 0.62, 0.7 ) * ${CITY.glass.toFixed(2)};
+  return mix( vec3( tint ), glass, win );
+}
+`;
+
+export type Detail = "grass" | "net" | "concrete" | "ground" | "slab" | "city";
 /**
  * v4: the granite-slab paving (M_Paving, M_Plaza) is a regular running bond, so it skips the anti-tiling second
  * lookup (the rotated copy broke the joints into patches) and takes half the ground mottling; the podium's
@@ -156,6 +189,7 @@ export type Detail = "grass" | "net" | "concrete" | "ground" | "slab";
 const ROUTES: [RegExp, Detail][] = [
   [/^M_(Paving|Plaza)\b/, "slab"],
   [/^M_(Lawn|Sand|Asphalt)\b/, "ground"],
+  [/^M_Building\d/, "city"],
   [/^M_Grass\b/, "grass"],
   [/^M_Net\b/, "net"],
   [/^M_(Concrete|ConcreteRiser|StepNosing|Soffit)\b/, "concrete"],

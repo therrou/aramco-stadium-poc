@@ -60,8 +60,12 @@ opt_glb "$RAW/stadium.glb" "$OUT/stadium.glb"
 cp "$RAW/seats.bin" "$RAW/sections.json" "$RAW/cameras.json" "$OUT/"
 
 # lightmaps and impostor atlases: PNG -> KTX2. Lightmaps are RGBM (linear), capped at 4096.
-find "$RAW" \( -path "*/lightmaps/*.png" -o -path "*/impostors/*.png" \) | while read -r png; do
+LMTMP=$(mktemp -d); TMP_DIRS+=("$LMTMP")
+find "$RAW" \( -path "*/lightmaps/*.png" -o -path "*/impostors/*.png" \) -not -path "*/lightmaps_noisy/*" | while read -r png; do
   rel=${png#"$RAW/"}; dst="$OUT/${rel%.png}.ktx2"; mkdir -p "$(dirname "$dst")"
+  case "$rel" in lightmaps/*)            # v4: RGBM -> gamma RGB before UASTC (webexport/rgbm.py GAMMA)
+    g="$LMTMP/$(echo "$rel" | tr / _)"; PYTHONPATH=scripts .venv/bin/python -m webexport.rgbm "$png" "$g"; png="$g" ;;
+  esac
   case "$rel" in
     # A7 (v2): mips on the far site only (seen at 6.5 m/texel from every aerial, where it shimmered). Mips on
     # every group cost +3.6 MB (37.2 MB > 35 MB budget; zstd 22 and UASTC RDO saved < 0.2 MB). RGBM filters
@@ -84,6 +88,7 @@ node -e '
 const fs=require("fs");const m=JSON.parse(fs.readFileSync(process.argv[1]));
 const k=p=>p&&p.replace(/\.png$/,".ktx2");
 for(const s of Object.values(m.states)) for(const g in s.lightmaps) s.lightmaps[g]=k(s.lightmaps[g]);
+m.lmGamma=3;   // v4: lightmaps are gamma RGB (webexport/rgbm.py GAMMA), not RGBM
 if(m.trees&&m.trees.impostors) for(const i of Object.values(m.trees.impostors)) i.atlas=k(i.atlas);
 fs.writeFileSync(process.argv[2],JSON.stringify(m,null,1));' "$RAW/manifest.json" "$OUT/manifest.json"
 

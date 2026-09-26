@@ -11,6 +11,8 @@ export const STATES: State[] = ["day", "golden", "night"];
 export interface Manifest {
   version: number;
   rgbmRange: number;
+  /** v4: lightmaps are gamma RGB decoded as pow(rgb, lmGamma) * rgbmRange; absent = RGBM. */
+  lmGamma?: number;
   stadium: string;
   trees: null | { glb: string; impostors: Record<string, { atlas: string; frames: number; size: number; centerZ: number }> };
   seats: string;

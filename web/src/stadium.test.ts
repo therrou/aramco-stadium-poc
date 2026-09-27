@@ -114,7 +114,7 @@ it("A1/A5: the sail skin has its own, higher occlusion floor (the coarse night s
 });
 it("D6: at night the sail skin's lighting blends to the smooth measured level (the night sail bake is noise around 0.2)", () => {
   const out = patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps);
-  expect(out).toMatch(/#ifdef SAIL_SKIN\s*lightMapIrradiance = mix\( lightMapIrradiance, sailNightIrradiance\( vWorldPosB \), smoothstep\( 0\.6, 1\.0, uNight \) \);/);
+  expect(out).toMatch(/#ifdef SAIL_SKIN\s*lightMapIrradiance = mix\( lightMapIrradiance, sailNightIrradiance\( vWorldPosB \), 0\.00 \* smoothstep\( 0\.6, 1\.0, uNight \) \);/);   // v5: SAIL_NIGHT_OVERRIDE 0
   expect(SAIL_NIGHT_E).toBeCloseTo(0.21, 2);
   expect(soMinDefine("sailLeds")).toContain("#define SAIL_SKIN");
   expect(soMinDefine(undefined)).not.toContain("SAIL_SKIN");

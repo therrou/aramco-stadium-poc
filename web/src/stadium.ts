@@ -34,6 +34,12 @@ export const soMinDefine = (special: string | undefined) =>
  * with the slight rim and base terms, instead of the texels.
  */
 export const SAIL_NIGHT_E = 0.21;
+/**
+ * v5: how much of that flat level replaces the night bake (1 = v3 behaviour). The v5 bakes are denoised and the
+ * matte skin shows what Cycles has at night: lime light spilling from each seam onto the next sail and the
+ * deck lights washing the lower sails (renders/v5). The flat level turned the sails a dead grey, so the bake stays.
+ */
+export const SAIL_NIGHT_OVERRIDE = 0.0;
 const SAIL_NIGHT_GLSL = /* glsl */ `
 #ifdef SAIL_SKIN
 vec3 sailNightIrradiance( vec3 pB ) {
@@ -60,7 +66,7 @@ export function patchLightsChunk(chunk: string) {
   return chunk
     .replace(LM_RE, `vec3 lightMapIrradiance = mix( rgbmDecode( texBicubic( lightMap, vLightMapUv ) ), rgbmDecode( texBicubic( uLmB, vLightMapUv ) ), uLmBlend ) * lightMapIntensity;
 #ifdef SAIL_SKIN
-	lightMapIrradiance = mix( lightMapIrradiance, sailNightIrradiance( vWorldPosB ), smoothstep( 0.6, 1.0, uNight ) );
+	lightMapIrradiance = mix( lightMapIrradiance, sailNightIrradiance( vWorldPosB ), ${SAIL_NIGHT_OVERRIDE.toFixed(2)} * smoothstep( 0.6, 1.0, uNight ) );
 #endif
 #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
 	{   // S1 (v3): outside the shell, sharpen the bake's (blurred) direct sun with the live shadow. The sky share is

@@ -275,12 +275,15 @@ def _podium(coll, paving, under, glass, steel):
     for i in range(n):
         for r in range(R):
             p00, p10, p11, p01 = grid[i][r], grid[(i + 1) % n][r], grid[(i + 1) % n][r + 1], grid[i][r + 1]
+            # i runs CCW and r outward, so (p00, p10, p11, p01) winds clockwise seen from above: the top is
+            # wound (p00, p01, p11, p10) to face up. v4/v5.0 had the two swapped, so the bake lit the paving
+            # from below (black by day on the web) and the soffit from above.
             k = len(verts)
-            verts.extend([(*p00, top), (*p10, top), (*p11, top), (*p01, top)])
+            verts.extend([(*p00, top), (*p01, top), (*p11, top), (*p10, top)])
             faces.append((k, k + 1, k + 2, k + 3))
             mids.append(0)
             k = len(verts)
-            verts.extend([(*p00, bot), (*p01, bot), (*p11, bot), (*p10, bot)])
+            verts.extend([(*p00, bot), (*p10, bot), (*p11, bot), (*p01, bot)])
             faces.append((k, k + 1, k + 2, k + 3))
             mids.append(1)
     for i in range(n):

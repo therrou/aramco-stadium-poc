@@ -150,11 +150,11 @@ float sailLeds( vec3 pB ) {
 
 /**
  * v4: the sail skin is translucent in Cycles (shell._add_translucency: 0.35 x (1 - n)) over an underside that
- * glows teal-mint (shell._under_material: (3.5 (1 - h)^1.6 + 1) x n, h the height 9..45 m), so at golden hour
+ * glows (v4 teal-mint, v5 lime green) (shell._under_material: (3.5 (1 - h)^1.6 + 1) x n, h the height 9..45 m), so at golden hour
  * the lobes read mint from outside. The web skin is opaque: that transmitted glow is added as emission.
  * k scales it against the Cycles pairs (renders/web_v4).
  */
-export const SAIL_GLOW = { k: 1.5, translucency: 0.35, color: [0.3, 0.95, 0.75] } as const;
+export const SAIL_GLOW = { k: 1.5, translucency: 0.35, color: [0.62, 1.0, 0.35] } as const;   // v5: lime (HD key visual)
 export const sailGlow = (z: number, n: number) => {
   const h = Math.min(Math.max((z - 9) / 36, 0), 1);
   return SAIL_GLOW.k * SAIL_GLOW.translucency * (1 - n) * n * (3.5 * (1 - h) ** 1.6 + 1);

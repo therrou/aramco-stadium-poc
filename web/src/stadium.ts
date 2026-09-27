@@ -38,7 +38,7 @@ const SAIL_NIGHT_GLSL = /* glsl */ `
 #ifdef SAIL_SKIN
 vec3 sailNightIrradiance( vec3 pB ) {
   float S = pow( pow( abs( pB.x / 138.0 ), 2.25 ) + pow( abs( pB.y / 121.0 ), 2.25 ), 1.0 / 2.25 );
-  float O = pow( pow( abs( pB.x / 76.0 ), 2.35 ) + pow( abs( pB.y / 63.0 ), 2.35 ), 1.0 / 2.35 );
+  float O = pow( pow( abs( pB.x / 66.0 ), 2.35 ) + pow( abs( pB.y / 51.0 ), 2.35 ), 1.0 / 2.35 );   // v5 oculus
   float e = S / max( O, 1e-3 ), s = O <= 1.0 ? 0.0 : clamp( ( S - e ) / max( 1.0 - e, 1e-3 ), 0.0, 1.2 );
   float E = ${SAIL_NIGHT_E.toFixed(3)} + 0.03 * ( 1.0 - clamp( s / 0.5, 0.0, 1.0 ) ) + 0.07 * smoothstep( 0.85, 1.0, s );
   return E * vec3( 0.92, 0.96, 1.06 );

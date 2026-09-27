@@ -7,11 +7,12 @@ import { easeInOutCubic, type Pose } from "./flyto";
  * The shell is described in plan by two superellipses (scripts/stadium/params.py): the oculus
  * (OCULUS_A/B/N) and the shell's outline (SHELL_A/B/N). `s` is the normalised plan position between
  * them (0 at the oculus rim, 1 at the outline). The envelope below was measured from the raw glb
- * (sails__M_SailSkin, structure__M_Steel; v4 sails: 16 puffier lobes): the skin sits at z 54-59 up to s 0.8
- * and drops to the podium (z 9) by s 1, with lobes bulging to 1.07 x the outline; the roof trusses hang down
- * to ~48 m (s < 0.5), ~41 m at s 0.7, ~34 m at s 0.8.
+ * (sails__M_SailSkin, structure__M_Steel). v5 (tighter oculus 66 x 51, rounder dome): the skin tops out at
+ * 61.6 m (s 0.2-0.4), 54 m at s 0.8, 50 m at s 0.9, 43 m on the outline, and lands on the podium (z 9) with
+ * lobes bulging to 1.057 x the outline; the trusses hang ~6 m under the skin (48.5 m at s 0.4). The steel
+ * minima of 21-22 m at s 0.5-0.9 are the louvre fins behind the upper tier, not in any flight's way.
  */
-const OC = { a: 76, b: 63, n: 2.35 }, SH = { a: 138, b: 121, n: 2.25 };
+const OC = { a: 66, b: 51, n: 2.35 }, SH = { a: 138, b: 121, n: 2.25 };
 const sup = (x: number, y: number, e: { a: number; b: number; n: number }) =>
   (Math.abs(x / e.a) ** e.n + Math.abs(y / e.b) ** e.n) ** (1 / e.n);
 /** Plan position: shell radius (1 on the outline), oculus radius (1 on the rim), s between them. */
@@ -26,21 +27,21 @@ const ramp = (s: number, pts: [number, number][]) => {
   return pts.at(-1)![1];
 };
 /** Lowest point of the roof structure (trusses) above plan position s. */
-export const roofUnder = (s: number) => ramp(s, [[0.5, 46], [0.8, 32], [1, 8]]);
+export const roofUnder = (s: number) => ramp(s, [[0.4, 47], [0.5, 45], [0.8, 29], [1, 8]]);
 /** Top of the sail skin above plan position s. */
-export const roofTop = (s: number) => ramp(s, [[0.8, 59], [1, 9]]);
+export const roofTop = (s: number) => ramp(s, [[0.6, 62], [0.8, 54], [0.9, 50], [1, 43], [1.06, 9]]);
 
 /** Inside the bowl's air volume (under the roof, or in the oculus column below the rim). */
 export function isInside(p: V3) {
   const { S, O, s } = plan(p);
   // near the rim (O >= 0.97) the trusses start at roofUnder: same bands as blocked(), so no point is both
-  return O < 0.97 ? p[2] < 56 : S < 1 && p[2] < roofUnder(s);
+  return O < 0.97 ? p[2] < 57 : S < 1 && p[2] < roofUnder(s);
 }
 /**
  * A camera position that is inside geometry: the roof and sails, the shell's base, or the ground. `margin`
  * widens the roof band downward (a resting orbit eye keeps clear of the trusses, so flights from it can too).
  */
-/** Outermost plan radius of the sail lobes (S), measured 1.071 on the v4 glb. */
+/** Outermost plan radius of the sail lobes (S): 1.071 on the v4 glb, 1.057 on v5 (kept with margin). */
 export const SHELL_BULGE = 1.08;
 export function blocked(p: V3, margin = 0) {
   const { S, O, s } = plan(p), z = p[2];
@@ -90,6 +91,9 @@ function approach(eye: V3): V3 {
   const q: V3 = [eye[0] * k, eye[1] * k, Math.min(eye[2] + 6, Math.max(eye[2], 40))];
   const { O, s } = plan(q);
   if (O >= 0.95) q[2] = Math.min(q[2], roofUnder(s) - 3);
+  // v5: an eye high in the oculus column (the rim is lower relative to the tighter ring) drops inside the
+  // column before any sideways leg, so the way out never grazes the trusses under the rim
+  else if (plan(eye).O < 0.97 && q[2] > INNER_Z + 4) q[2] = INNER_Z + 4;
   return q;
 }
 

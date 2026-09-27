@@ -37,6 +37,14 @@ describe("app state (v2: overview | seat)", () => {
     expect(reduce(orbit, { type: "autoOrbit", on: true })).toBe(orbit);
     expect(reduce(orbit, { type: "seat", seat: A }).autoOrbit).toBe(false);
   });
+  it("no auto orbit inside the bowl: entering stops it, and it cannot start there (user request 2026-09-27)", () => {
+    const orbit = reduce(initialState, { type: "autoOrbit", on: true });
+    const inside = reduce(orbit, { type: "inside", on: true });
+    expect(inside.autoOrbit).toBe(false);
+    expect(reduce(inside, { type: "autoOrbit", on: true })).toBe(inside);
+    expect(reduce(inside, { type: "inside", on: true })).toBe(inside);
+    expect(reduce(reduce(inside, { type: "inside", on: false }), { type: "autoOrbit", on: true }).autoOrbit).toBe(true);
+  });
 });
 
 import { parseLighting } from "./state";

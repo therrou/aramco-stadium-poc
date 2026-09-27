@@ -155,7 +155,8 @@ export class CameraRig {
     c.maxDistance = Infinity;
     c.update();
     [c.dampingFactor, c.minDistance, c.maxDistance] = [damping, minD, maxD];
-    return new Promise<void>((done) => { this.flight = { plan: planFlight(this.pose(), to, opts), to, expFrom: this.exposure, expTo: exposure, t: 0, done }; this.controls.enabled = false; });
+    // the plan may turn the landing pose (Top view keeps the heading it is approached with)
+    return new Promise<void>((done) => { const plan = planFlight(this.pose(), to, opts); this.flight = { plan, to: plan.to, expFrom: this.exposure, expTo: exposure, t: 0, done }; this.controls.enabled = false; });
   }
   jump(p: Pose, exposure = this.exposure) { this.apply(p); this.exposure = exposure; this.floorZ = p.eye[2]; }
   update(dt: number) {

@@ -2,16 +2,18 @@ import { STATES, type State } from "./loader";
 import type { SeatRef } from "./seatsData";
 
 export type View = { kind: "overview" } | { kind: "seat"; seat: SeatRef };
-export interface AppState { view: View; lighting: State; autoOrbit: boolean }
+/** `inside`: the camera is in the bowl (under the roof), where auto orbit is off (user request 2026-09-27). */
+export interface AppState { view: View; lighting: State; autoOrbit: boolean; inside: boolean }
 export type Action =
   | { type: "seat"; seat: SeatRef }
   | { type: "back" }
   | { type: "lighting"; lighting: State }
   | { type: "camera"; camera: string }      // a hero view or a mode-bar camera
   | { type: "autoOrbit"; on: boolean }
+  | { type: "inside"; on: boolean }
   | { type: "none" };
 
-export const initialState: AppState = { view: { kind: "overview" }, lighting: "golden", autoOrbit: false };
+export const initialState: AppState = { view: { kind: "overview" }, lighting: "golden", autoOrbit: false, inside: false };
 export const sameSeat = (a: SeatRef, b: SeatRef) => a.section === b.section && a.row === b.row && a.seat === b.seat;
 
 export function reduce(s: AppState, a: Action): AppState {
@@ -26,8 +28,10 @@ export function reduce(s: AppState, a: Action): AppState {
     case "camera":
       return { ...s, view: { kind: "overview" }, autoOrbit: false };
     case "autoOrbit":
-      if (a.on === s.autoOrbit || (a.on && s.view.kind === "seat")) return s;
+      if (a.on === s.autoOrbit || (a.on && (s.view.kind === "seat" || s.inside))) return s;
       return { ...s, autoOrbit: a.on };
+    case "inside":
+      return a.on === s.inside ? s : { ...s, inside: a.on, autoOrbit: s.autoOrbit && !a.on };
     default:
       return s;
   }

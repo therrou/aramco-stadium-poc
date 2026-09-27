@@ -50,9 +50,9 @@ export function blocked(p: V3, margin = 0) {
   return (z > roofUnder(s) - margin && z < top) || (s > 0.88 && z < top);
 }
 
-export const FLIGHT_MIN_S = 1.2, FLIGHT_MAX_S = 3.2;
+export const FLIGHT_MIN_S = 1.5, FLIGHT_MAX_S = 3.6;
 /** Flight time from path length: long flights are slower on screen but never drag. */
-export const flightSeconds = (len: number) => Math.min(FLIGHT_MAX_S, Math.max(FLIGHT_MIN_S, 1.2 + len / 350));
+export const flightSeconds = (len: number) => Math.min(FLIGHT_MAX_S, Math.max(FLIGHT_MIN_S, 1.5 + len / 330));
 
 const add = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -69,7 +69,8 @@ const dirOf = (p: Pose) => unit(sub(p.target, p.eye));
 export const FOCUS: V3 = [0, 0, 0];
 const bearing = (p: V3) => Math.atan2(p[1], p[0]);
 /** Bearing of p, or of `other` when p is on the axis (Top view): the route then heads for other's side. */
-const bearingOr = (p: V3, other: V3) => (Math.hypot(p[0], p[1]) < 5 ? bearing(other) : bearing(p));
+const bearingOr = (p: V3, other: V3) => (onAxis(p) ? bearing(other) : bearing(p));
+const onAxis = (p: V3) => Math.hypot(p[0], p[1]) < 5;
 /** An outside eye over the shell's plan (above the oculus or the skin) first climbs clear of the roof. */
 function climb(p: V3): V3[] {
   const { S } = plan(p);
@@ -117,7 +118,9 @@ function outToIn(from: Pose, to: Pose): Route {
   const g = gate(to.eye), hi = g[0];
   const rf = radius(from.eye), r0 = Math.max(rf, OUT_R), z0 = Math.max(from.eye[2], 90), bf = bearingOr(from.eye, hi);
   const pts: V3[] = [from.eye, ...climb(from.eye)];
-  if (rf < OUT_R || from.eye[2] < 90) pts.push(at(bf, r0, z0));         // clear of the shell first
+  // clear of the shell first; from Top view (on the axis, high) head straight out and down instead of
+  // sliding sideways at full height first (user request 2026-09-27)
+  if ((rf < OUT_R || from.eye[2] < 90) && !(onAxis(from.eye) && from.eye[2] >= 90)) pts.push(at(bf, r0, z0));
   pts.push(...arc(bf, bearing(hi), r0, radius(hi), z0, hi[2]), ...g, to.eye);
   return { pts };
 }
@@ -138,9 +141,11 @@ function outToOut(from: Pose, to: Pose): Route {
   const zf = Math.max(from.eye[2], 60), zt = Math.max(to.eye[2], 60);
   const bf = bearingOr(from.eye, to.eye), bt = bearingOr(to.eye, from.eye);
   const pts: V3[] = [from.eye, ...climb(from.eye)];
-  if (radius(from.eye) < OUT_R || from.eye[2] < 60) pts.push(at(bf, rf, zf));
+  // an eye on the axis high above the roof (Top view) needs no leg out to OUT_R: it flies straight in or out
+  const high = (p: V3) => onAxis(p) && p[2] >= 60;
+  if ((radius(from.eye) < OUT_R || from.eye[2] < 60) && !high(from.eye)) pts.push(at(bf, rf, zf));
   pts.push(...arc(bf, bt, rf, rt, zf, zt, 30));
-  if (radius(to.eye) < OUT_R || to.eye[2] < 60) pts.push(at(bt, rt, zt));
+  if ((radius(to.eye) < OUT_R || to.eye[2] < 60) && !high(to.eye)) pts.push(at(bt, rt, zt));
   pts.push(...climb(to.eye).reverse(), to.eye);
   return { pts };
 }
@@ -166,49 +171,58 @@ function sampleRoute(r: Route, n: number) {
 }
 
 /**
- * Normalised slerp between unit vectors. Nearly opposite directions have no well-defined great circle
- * (final review): go through the horizontal-ish midpoint 90 degrees round the vertical from a, so the turn
- * is a head turn rather than a flip through straight up or down.
+ * View direction between unit vectors a and b, turning the heading (yaw, the shorter way round) and the pitch
+ * separately. A slerp between two steep views with different headings passes through straight down, where
+ * the heading, which lookAt derives from the tiny horizontal part, spins at once (leaving Top view);
+ * here it turns evenly. Antiparallel level views turn about the vertical, a head turn (final review).
  */
-function slerp(a: V3, b: V3, t: number): V3 {
-  const d = Math.min(1, Math.max(-1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]));
-  if (d < -0.95) {
-    let m: V3 = [-a[1], a[0], 0];                        // a turned 90 degrees about the vertical
-    if (Math.hypot(m[0], m[1]) < 1e-3) m = [1, 0, 0];   // a vertical: any horizontal will do
-    m = unit(m);
-    return t < 0.5 ? slerp(a, m, t * 2) : slerp(m, b, t * 2 - 1);
-  }
-  const w = Math.acos(d);
-  if (w < 1e-6) return b;
-  const sa = Math.sin((1 - t) * w) / Math.sin(w), sb = Math.sin(t * w) / Math.sin(w);
-  return unit([a[0] * sa + b[0] * sb, a[1] * sa + b[1] * sb, a[2] * sa + b[2] * sb]);
+function turnView(a: V3, b: V3, t: number): V3 {
+  const ya = Math.atan2(a[1], a[0]), yb = Math.atan2(b[1], b[0]);
+  const pa = Math.asin(Math.min(1, Math.max(-1, a[2]))), pb = Math.asin(Math.min(1, Math.max(-1, b[2])));
+  const y = ya + turn(ya, yb) * t, p = lerp(pa, pb, t);
+  return [Math.cos(p) * Math.cos(y), Math.cos(p) * Math.sin(y), Math.sin(p)];
 }
-const smooth = (t: number) => t * t * (3 - 2 * t);
+/** Quintic ease: zero velocity and acceleration at both ends, so ramps start and stop without a jolt. */
+const smoother = (t: number) => t * t * t * (t * (6 * t - 15) + 10);
 
 /**
  * Time -> distance fraction with fixed-length ramps (C4): speed rises over ACCEL_S, cruises, and falls
  * over BRAKE_S, whatever the duration. A cubic ease over a 3 s flight sat nearly still for the first second.
  */
-export const ACCEL_S = 0.45, BRAKE_S = 0.6;
+export const ACCEL_S = 0.7, BRAKE_S = 0.95;
 function motionProfile(seconds: number) {
   const ta = Math.min(ACCEL_S / seconds, 0.4), td = Math.min(BRAKE_S / seconds, 0.45), N = 256;
-  const v = (x: number) => smooth(Math.min(1, x / ta)) * smooth(Math.min(1, (1 - x) / td));
+  const v = (x: number) => smoother(Math.min(1, x / ta)) * smoother(Math.min(1, (1 - x) / td));
   const cum = [0];
   for (let i = 1; i <= N; i++) cum.push(cum[i - 1] + (v((i - 0.5) / N)) / N);
   const total = cum[N];
   return (t: number) => { const x = t * N, i = Math.min(N - 1, Math.floor(x)); return (cum[i] + (cum[i + 1] - cum[i]) * (x - i)) / total; };
 }
 
-export interface Flight { seconds: number; length: number; at(t: number): Pose }
+/** `to`: the pose the flight lands on (Top view is turned to the heading it is approached from). */
+export interface Flight { seconds: number; length: number; to: Pose; at(t: number): Pose }
+
+/**
+ * Top view looks straight down, so its heading is arbitrary: arriving, keep the heading the camera comes in
+ * with (looking toward the axis from `from`), instead of spinning to the Blender camera's at the end
+ * (user request 2026-09-27). Only for a straight-down pose on the axis, and a start off the axis.
+ */
+export function reheadTop(from: Pose, to: Pose): Pose {
+  const d = sub(to.target, to.eye), n = len3(d);
+  if (!onAxis(to.eye) || n === 0 || d[2] / n > -0.99 || onAxis(from.eye)) return to;
+  const h = unit([-from.eye[0], -from.eye[1], 0]), c = Math.max(Math.hypot(d[0], d[1]) / n, 1e-4), sz = -Math.sqrt(1 - c * c);
+  return { ...to, target: add(to.eye, scale([h[0] * c, h[1] * c, sz], n)) };
+}
 
 /**
  * Plans a flight (C1-C4). The eye follows a smooth route that never passes through the shell; the view
- * direction is slerped between look keys (not a lerped target), the look-at distance log-lerped, and time
+ * direction is turned (heading and pitch) between look keys (not a lerped target), the look-at distance log-lerped, and time
  * is eased by arc length so the speed is continuous. `direct` is a straight move (zoom buttons).
  */
-export function planFlight(from: Pose, to: Pose, opts: { direct?: boolean; seconds?: number } = {}): Flight {
+export function planFlight(from: Pose, dest: Pose, opts: { direct?: boolean; seconds?: number } = {}): Flight {
+  const still = len3(sub(dest.eye, from.eye)) < 0.5;    // same place (a re-clicked view): just turn
+  const to = opts.direct || still ? dest : reheadTop(from, dest);
   const fi = isInside(from.eye), ti = isInside(to.eye);
-  const still = len3(sub(to.eye, from.eye)) < 0.5;      // same place (a re-clicked view): just turn
   const r: Route = opts.direct || still ? { pts: [from.eye, to.eye] }
     : fi && ti ? inToIn(from, to) : !fi && ti ? outToIn(from, to) : fi && !ti ? inToOut(from, to) : outToOut(from, to);
   const c = curve(r.pts), N = 512;
@@ -225,24 +239,25 @@ export function planFlight(from: Pose, to: Pose, opts: { direct?: boolean; secon
   };
   const dist0 = len3(sub(from.target, from.eye)), dist1 = len3(sub(to.target, to.eye));
   // the view: from the start view into "looking at the pitch centre" over the first 22 % of the way, held
-  // there, and into the destination view over the last 22 % (direct flights slerp start to end)
+  // there, and into the destination view over the last 22 % (direct flights turn start to end)
   const d0 = dirOf(from), d1 = dirOf(to);
   const look = (e: number, eye: V3): V3 => {
-    if (opts.direct || still) return slerp(d0, d1, smooth(e));
+    if (opts.direct || still) return turnView(d0, d1, smoother(e));
     const focus = unit(sub(FOCUS, eye));
-    const v = slerp(d0, focus, smooth(Math.min(1, e / 0.22)));
-    return slerp(v, d1, smooth(Math.max(0, (e - 0.78) / 0.22)));
+    const v = turnView(d0, focus, smoother(Math.min(1, e / 0.22)));
+    return turnView(v, d1, smoother(Math.max(0, (e - 0.78) / 0.22)));
   };
   const seconds = opts.seconds ?? flightSeconds(length), ease = opts.direct || still ? easeInOutCubic : motionProfile(seconds);
   return {
     seconds,
     length,
+    to,
     at(t: number): Pose {
       if (t <= 0) return from;
       if (t >= 1) return to;
       const e = ease(t), u = uAt(e), eye = c(u), dir = look(e, eye);
-      const dist = Math.exp(lerp(Math.log(dist0), Math.log(dist1), smooth(e)));
-      return { eye, target: add(eye, scale(dir, dist)), hfov: lerp(from.hfov, to.hfov, smooth(e)) };
+      const dist = Math.exp(lerp(Math.log(dist0), Math.log(dist1), smoother(e)));
+      return { eye, target: add(eye, scale(dir, dist)), hfov: lerp(from.hfov, to.hfov, smoother(e)) };
     },
   };
 }

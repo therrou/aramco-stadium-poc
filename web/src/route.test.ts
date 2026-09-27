@@ -39,6 +39,9 @@ const pairs: [string, Pose, Pose][] = [
   ["aerial -> centre-line classic (hero)", CAM.aerialSW, CAM.seat201],
   ["bowl -> centre-line classic (opposite side)", CAM.bowl, CAM.seat201],
   ["seat 312 -> seat 101 (across the bowl)", CAM.seat312, CAM.seat101],
+  ["aerial -> top", CAM.aerialSW, CAM.top],
+  ["bowl -> top", CAM.bowl, CAM.top],
+  ["aerial E -> top", CAM.aerialE, CAM.top],
 ];
 
 describe("flight routes (spec v3 C2-C4)", () => {
@@ -57,7 +60,7 @@ describe("flight routes (spec v3 C2-C4)", () => {
       expect(s[0].eye).toEqual(from.eye);
       expect(s.at(-1)!.eye).toEqual(to.eye);
       for (let i = 1; i < s.length; i++) expect(angle(dirOf(s[i - 1]), dirOf(s[i]))).toBeLessThan((8 * Math.PI) / 180);
-      expect(angle(dirOf(s.at(-1)!), dirOf(to))).toBeLessThan(1e-6);
+      expect(angle(dirOf(s.at(-1)!), dirOf(planFlight(from, to).to))).toBeLessThan(1e-6);
     });
   }
   it("mid-flight the view stays on the pitch centre (user request 2026-09-25)", () => {
@@ -162,6 +165,31 @@ describe("final review fixes (routes)", () => {
       let d = Math.atan2(p.eye[1], p.eye[0]) - b0; d = Math.atan2(Math.sin(d), Math.cos(d));
       expect(Math.abs(d)).toBeLessThan(Math.PI / 3);
     }
+  });
+});
+describe("Top view flights (user request 2026-09-27)", () => {
+  // screen heading of a view: the horizontal part of its direction (for Top view, the image's up)
+  const heading = (p: Pose) => { const d = dirOf(p); return Math.atan2(d[1], d[0]); };
+  const dh = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+  for (const from of [CAM.aerialSW, CAM.aerialE, CAM.bowl, CAM.approach]) {
+    it(`lands on Top view keeping the heading it arrives with, no spin (from ${from.eye.join(",")})`, () => {
+      const f = planFlight(from, CAM.top), s = samples(from, CAM.top, 400);
+      expect(f.to.eye).toEqual(CAM.top.eye);
+      expect(angle(dirOf(f.to), [0, 0, -1])).toBeLessThan(1e-3);        // still straight down
+      // over the last fifth of the way the heading barely turns (it used to swing to the Blender camera's)
+      for (const p of s.slice(320)) expect(dh(heading(p), heading(f.to))).toBeLessThan((10 * Math.PI) / 180);
+    });
+  }
+  it("flies straight in: no leg out and across at full height (the eye rises as it closes on the axis)", () => {
+    const s = samples(CAM.aerialSW, CAM.top, 200);
+    for (let i = 1; i < s.length; i++) {
+      expect(s[i].eye[2]).toBeGreaterThanOrEqual(s[i - 1].eye[2] - 1e-6);
+      expect(Math.hypot(s[i].eye[0], s[i].eye[1])).toBeLessThanOrEqual(Math.hypot(s[i - 1].eye[0], s[i - 1].eye[1]) + 0.05);
+    }
+  });
+  it("leaving Top view the heading turns evenly (no flip through straight down)", () => {
+    const s = samples(CAM.top, CAM.seat101, 400);
+    for (let i = 1; i < s.length; i++) expect(dh(heading(s[i]), heading(s[i - 1])), `@${i}`).toBeLessThan((6 * Math.PI) / 180);
   });
 });
 describe("final review fixes (rig)", () => {

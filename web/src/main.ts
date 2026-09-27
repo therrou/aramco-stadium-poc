@@ -11,6 +11,7 @@ import type { Tier } from "./tiers";
 import { SeatField, SeatHighlight, nearSections, visibleSections, NEAR_SEAT_CAP, SEAT_LOD_DIST, SEAT_NEAR_M } from "./seats";
 import { SectionPatches } from "./sectionPatches";
 import { CameraRig, ZOOM_S, pivotOf } from "./camera";
+import { isInside } from "./route";
 import { cameraPose, seatViewPose, SEAT_EXP, type Pose } from "./flyto";
 import { nearestSeatToRay } from "./seatPick";
 import { DepthProbe, acceptPatchHit, onClick } from "./picking";
@@ -163,7 +164,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   resize();
   renderer.info.autoReset = false;
 
-  let app: AppState = { ...initialState, lighting: startState };
+  let app: AppState = { ...initialState, lighting: startState, inside: isInside(rig.pose().eye) };
   const seatPose = (r: SeatRef) => seatViewPose(dir.position(dir.find(r)));
   const syncUrl = () => {
     const u = new URL(location.href);
@@ -255,7 +256,11 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
       if (i >= 0) tooltip.show(h.x, h.y, dir.ref(i), tierOf.get(table.section[i]) ?? "Lower"); else tooltip.hide();
       hover = null;                                                          // re-pick only after the pointer moves again
     }
-    const focus = app.view.kind === "seat" ? app.view.seat.section : -1;
+    const inside = isInside(toBlender(camera.position));
+    if (inside !== app.inside) dispatch({ type: "inside", on: inside });
+    // the chosen seat's section is kept drawn once the flight lands; forced from afar it popped in as a darker
+    // block of real seats among the (lighter, averaged) section patches (user report 2026-09-27)
+    const focus = app.view.kind === "seat" && !rig.flying ? app.view.seat.section : -1;
     const vis = visibleSections(toBlender(camera.position), a.sections.sections, SEAT_LOD_DIST, focus);
     seats.setVisibleSections(vis, nearSections(toBlender(camera.position), a.sections.sections, SEAT_NEAR_M, NEAR_SEAT_CAP));
     patches.setHidden(vis);

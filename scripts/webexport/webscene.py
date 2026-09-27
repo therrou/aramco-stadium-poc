@@ -54,8 +54,10 @@ def _fresh_scene():
     for cname in ("Lighting", "NightLights"):
         web.collection.children.link(bpy.data.collections[cname])
     for o in s.objects:
-        if o.name.startswith(("Seats_", "Trees_", "Crowd_")):
-            web.collection.objects.link(o)                     # occluders only; not exported
+        # occluders only; not exported. v5: not the crowd: the web draws no people, so their contact shadows
+        # were baked onto the deck as dark smudges once it was lit (deck winding fix)
+        if o.name.startswith(("Seats_", "Trees_")):
+            web.collection.objects.link(o)
     return web
 
 

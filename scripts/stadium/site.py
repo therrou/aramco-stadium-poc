@@ -820,6 +820,63 @@ def _box_mesh(name, boxes, coll, mats, mat_of_box=None, uvs=False):
     return C.mesh_object(name, verts, faces, coll, mats, mat_indices=mids)
 
 
+TOWERS = [(98.0, 470, 120), (104.0, 505, 95), (92.0, 530, 135), (110.0, 470, 80), (86.0, 480, 70),
+          (116.0, 540, 105), (100.0, 590, 110), (122.0, 500, 65)]      # (azimuth deg, radius m, height m)
+# elevated highway on the far (north-east) side, over the NE arterial (HD key visual background)
+VIADUCT = ((890, -160), (-490, 770))    # ~400 m behind the stadium, across the key-visual view axis
+VIADUCT_W, VIADUCT_Z = 26.0, 16.0       # clears the NE bridge where they cross
+
+
+def _viaduct(coll, asphalt, under):
+    """An elevated multi-lane highway on piers with lit parapets, plus a looping slip ramp."""
+    (x0, y0), (x1, y1) = VIADUCT
+    tx, ty = x1 - x0, y1 - y0
+    ln = math.hypot(tx, ty)
+    ux, uy = tx / ln, ty / ln
+    nx, ny = -uy, ux
+    pts = [(x0 + ux * s_, y0 + uy * s_, VIADUCT_Z) for s_ in range(0, int(ln) + 1, 20)]
+    # slip ramp: leaves the highway, loops down to the ground toward the stadium side
+    mid = int(len(pts) * 0.42)
+    mx, my, _ = pts[mid]
+    ramp = []
+    for k in range(40):
+        t = k / 39
+        a = math.pi * 1.25 * t
+        cx, cy = mx - nx * 60, my - ny * 60
+        ramp.append((cx + nx * 60 * math.cos(a) + ux * 60 * math.sin(a),
+                     cy + ny * 60 * math.cos(a) + uy * 60 * math.sin(a), VIADUCT_Z * (1 - t) + 0.2 * t))
+    glow = _street_glow()
+    for name, path, w in (("Viaduct", pts, VIADUCT_W), ("Viaduct_Ramp", ramp, 10.0)):
+        verts, faces, mids = [], [], []
+        lv, lf = [], []
+        piers = []
+        for i, (x, y, z) in enumerate(path):
+            j = min(i + 1, len(path) - 1)
+            i0 = max(i - 1, 0)
+            dx, dy = path[j][0] - path[i0][0], path[j][1] - path[i0][1]
+            dl = math.hypot(dx, dy) or 1.0
+            px, py = -dy / dl * w / 2, dx / dl * w / 2
+            verts += [(x + px, y + py, z), (x - px, y - py, z), (x + px, y + py, z - 1.6), (x - px, y - py, z - 1.6)]
+            lv += [(x + px * 0.97, y + py * 0.97, z + 1.0), (x + px * 0.97, y + py * 0.97, z + 1.2),
+                   (x - px * 0.97, y - py * 0.97, z + 1.0), (x - px * 0.97, y - py * 0.97, z + 1.2)]
+            if i % 2 == 0 and z > 3:
+                piers.append((x, y, z))
+        for i in range(len(path) - 1):
+            a, b_ = 4 * i, 4 * (i + 1)
+            faces += [(a, a + 1, b_ + 1, b_), (a + 2, b_ + 2, b_ + 3, a + 3),
+                      (a, b_, b_ + 2, a + 2), (a + 1, a + 3, b_ + 3, b_ + 1)]
+            mids += [0, 1, 1, 1]
+            lf += [(a, b_, b_ + 1, a + 1), (a + 2, a + 3, b_ + 3, b_ + 2)]
+        C.mesh_object(name, verts, faces, coll, [asphalt, under], mat_indices=mids)
+        C.mesh_object(f"{name}_Glow", lv, lf, coll, [glow])
+        pv, pe = [], []
+        for x, y, z in piers:
+            pv += [(x, y, 0.0), (x, y, z - 1.6)]
+            pe.append((len(pv) - 2, len(pv) - 1))
+        pier = C.mesh_object(f"{name}_Piers", pv, [], coll, edges=pe)
+        C.tube_modifier(pier, 1.4, under, 8)
+
+
 def _city(coll):
     rng = random.Random(11)
     walls = [C.principled(f"M_Building{i}", col, rough=0.8) for i, col in enumerate(
@@ -835,6 +892,10 @@ def _city(coll):
         boxes.append((x, y, rng.uniform(14, 40), rng.uniform(14, 36), h, rng.choice([0.3, 0.3, 1.87])))
     # two towers south-west of the stadium (as in the aerial renders)
     boxes += [(-230, -420, 34, 34, 150, 0.3), (-180, -405, 34, 34, 150, 0.3)]
+    # v5: a cluster of high-rise towers behind-left of the stadium from the key-visual camera
+    for k, (az, r, h) in enumerate(TOWERS):
+        a = math.radians(az)
+        boxes.append((r * math.cos(a), r * math.sin(a), rng.uniform(26, 36), rng.uniform(26, 36), h, 0.3 + 0.1 * k))
     for m in walls:
         _lit_windows(m)
     _box_mesh("City", boxes, coll, walls, mat_of_box=lambda i: rng.randrange(len(walls)))
@@ -946,6 +1007,7 @@ def build(root):
         _bridge(name, paths[name], 11.0, coll, paving, under, glass, steel)
     asphalt, lawn = _ground(coll)
     _roads(coll, asphalt)
+    _viaduct(coll, asphalt, under)
     L.ring_road(coll, asphalt)
     ncars, island_trees = L.car_parks(coll, asphalt, lawn)
     nbld = _city(coll)

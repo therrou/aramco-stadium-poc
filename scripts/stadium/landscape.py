@@ -177,7 +177,8 @@ def tree_points(park_poly, blocked, extra, rng):
     for gx in range(-g, g, int(step)):
         for gy in range(-g, g, int(step)):
             x, y = gx + rng.uniform(-2.8, 2.8), gy + rng.uniform(-2.8, 2.8)
-            if _density(x, y) < 0.52 or not inside(x, y) or blocked(x, y):
+            near = math.hypot(x, y) < 420               # v5: denser canopy around the stadium (HD key visual)
+            if _density(x, y) < (0.4 if near else 0.52) or not inside(x, y) or blocked(x, y):
                 continue
             pts.append((x, y, False))
     pts += [(x, y, True) for x, y in extra]
@@ -309,16 +310,27 @@ def canopies(coll, steel, paths=()):
 
 
 # --- people ------------------------------------------------------------------
-def _person_mesh(name, mat):
+def _person_mesh(name, mat, flag=None):
+    """A simple standing figure; with `flag` (a material) it also waves a green flag on a pole
+    (HD key visual: fans with Saudi-green flags)."""
     bm = bmesh.new()
     bmesh.ops.create_cone(bm, cap_ends=True, segments=8, radius1=0.26, radius2=0.2,
                           depth=1.45, matrix=Matrix.Translation((0, 0, 0.72)))
     bmesh.ops.create_uvsphere(bm, u_segments=8, v_segments=6, radius=0.12,
                               matrix=Matrix.Translation((0, 0, 1.58)))
+    nbody = len(bm.faces)
+    if flag is not None:
+        bmesh.ops.create_cone(bm, cap_ends=True, segments=4, radius1=0.02, radius2=0.02, depth=1.3,
+                              matrix=Matrix.Translation((0.3, 0, 1.75)))
+        v = [bm.verts.new(c) for c in ((0.3, 0, 2.4), (1.2, 0.08, 2.35), (1.2, 0.08, 1.8), (0.3, 0, 1.85))]
+        bm.faces.new(v)
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
     bm.free()
     me.materials.append(mat)
+    if flag is not None:
+        me.materials.append(flag)
+        me.polygons.foreach_set("material_index", [0 if i < nbody else 1 for i in range(len(me.polygons))])
     me.shade_smooth()
     return me
 
@@ -326,14 +338,15 @@ def _person_mesh(name, mat):
 def crowds(coll, areas, count, rng):
     """areas: list of callables returning a random (x, y, z) or None."""
     looks = [("White", (0.85, 0.84, 0.8)), ("Dark", (0.03, 0.03, 0.035)),
-             ("Green", (0.02, 0.35, 0.16)), ("Mixed", (0.35, 0.3, 0.26))]
-    weights = [0.38, 0.27, 0.25, 0.10]
+             ("Green", (0.02, 0.35, 0.16)), ("Mixed", (0.35, 0.3, 0.26)), ("Flag", (0.85, 0.84, 0.8))]
+    weights = [0.33, 0.24, 0.20, 0.08, 0.15]
+    flag = bpy.data.materials.get("M_Flag") or C.principled("M_Flag", (0.0, 0.33, 0.14), rough=0.7)
     lib = bpy.data.collections.get("PeopleModels") or bpy.data.collections.new("PeopleModels")
     models = []
     for name, col in looks:
         mat = bpy.data.materials.get(f"M_Person{name}") or C.principled(f"M_Person{name}", col, rough=0.8)
         obj = bpy.data.objects.get(f"Person_{name}")
-        me = _person_mesh(f"PersonMesh_{name}", mat)
+        me = _person_mesh(f"PersonMesh_{name}", mat, flag if name == "Flag" else None)
         if obj is None:
             obj = bpy.data.objects.new(f"Person_{name}", me)
         else:

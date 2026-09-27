@@ -21,7 +21,7 @@ SAMPLE_SECTIONS = ("101", "112", "123", "134", "201", "212", "301", "306", "312"
 
 
 # CAM_KeyVisual framing along the sign axis: eye distance / sideways offset / height, aim point, lens (mm)
-KV_DIST, KV_SIDE, KV_Z, KV_AIM, KV_LENS = 300.0, -20.0, 150.0, 10.0, 33.0
+KV_DIST, KV_SIDE, KV_Z, KV_AIM, KV_LENS = 265.0, -15.0, 125.0, 30.0, 33.0
 
 EXPOSURE = {"Sign": -0.2, "Aerial": -0.4, "Top": -0.4, "Approach": -0.25, "Pitch": 0.1, "Bowl": 0.05, "Seat": 0.1}
 

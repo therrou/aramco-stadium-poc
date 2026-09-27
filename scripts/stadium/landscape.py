@@ -9,6 +9,7 @@
 * the "aramco stadium" sign standing on the walkway at the south-west entrance.
 """
 import math
+import os
 import random
 
 import bmesh
@@ -48,17 +49,39 @@ def in_lot(x, y, margin=0.0):
     return False
 
 
+# v5: the ring road swings out around the deck's front lobe and garden (true azimuth deg, m, spread deg)
+RING_BULGE = (232.0, 46.0, 24.0)
+
+
+def _bulge(x, y):
+    a, extra, spread = RING_BULGE
+    d = (math.degrees(math.atan2(y, x)) - a + 180.0) % 360.0 - 180.0
+    return extra * math.exp(-0.5 * (d / spread) ** 4)
+
+
+def ring_point(t):
+    x, y = C.superellipse(RING_A, RING_B, 2.2, t)
+    r = math.hypot(x, y)
+    k = (r + _bulge(x, y)) / r
+    return x * k, y * k
+
+
 def ring_distance(x, y):
-    """Approximate distance to the ring road centreline (superellipse)."""
+    """Approximate distance to the ring road centreline (superellipse, bulged at the garden)."""
     a = math.atan2(y / RING_B, x / RING_A)
-    rx, ry = C.superellipse(RING_A, RING_B, 2.2, a)
+    rx, ry = ring_point(a)
     return abs(math.hypot(x, y) - math.hypot(rx, ry))
 
 
 # --- ring road ---------------------------------------------------------------
 def ring_road(coll, asphalt):
     n = 360
-    pts, nrm = C.plan_loop(RING_A, RING_B, 2.2, n)
+    pts = [ring_point(2 * math.pi * i / n) for i in range(n)]
+    nrm = []
+    for i in range(n):
+        (x0, y0), (x1, y1) = pts[i - 1], pts[(i + 1) % n]
+        ln = math.hypot(x1 - x0, y1 - y0) or 1.0
+        nrm.append(((y1 - y0) / ln, -(x1 - x0) / ln))
     prof = [(-RING_W / 2, 0.02), (RING_W / 2, 0.02)]
     C.sweep(pts, nrm, prof, "Ring_Road", coll, [asphalt])
     glow = bpy.data.materials.get("M_StreetGlow")
@@ -344,6 +367,9 @@ def crowds(coll, areas, count, rng):
 
 
 # --- sign ----------------------------------------------------------------------
+SIGN_SIZE = 15.0      # Aktiv Black at 15: ascenders ~5.2 m, ~54 m long (HD key visual)
+SIGN_FONT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                         "blender", "fonts", "AktivGrotesk_Blk.ttf")
 SIGN_INSET = 0.25     # metres inside the walkway's outer edge: mounted on the parapet
 SIGN_BASE = 1.15      # parapet (glass balustrade) height above the deck
 
@@ -371,11 +397,13 @@ def sign(coll, edge_fn, deg=236.0):
     text = bpy.data.curves.new("SignText", "FONT")
     text.body = "aramco stadium"
     text.align_x = "LEFT"
-    text.size = 6.0
+    text.size = SIGN_SIZE
     text.extrude = 0.18
     text.bevel_depth = 0.02
     text.space_character = 0.95
     text.materials.append(mat)
+    if os.path.exists(SIGN_FONT):            # licensed, local only (blender/fonts is gitignored)
+        text.font = bpy.data.fonts.load(SIGN_FONT, check_existing=True)
     obj = bpy.data.objects.new("Sign_AramcoStadium", text)
     coll.objects.link(obj)
     # letters stand upright: local text plane XY -> world XZ

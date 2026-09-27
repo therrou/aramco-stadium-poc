@@ -84,7 +84,7 @@ def build(root):
         ("CAM_Aerial_E", (520, 120, 260), (0, 0, 15), 45),
         ("CAM_Aerial_Dusk", (430, -250, 150), (-10, 25, 10), 30),   # key-visual framing into the sunset
         ("CAM_Top", (0, 0.01, 820), (0, 0, 0), 50),
-        ("CAM_Approach", (*site._podium_edge(math.radians(262)), 0), (0, 0, 24), 24),
+        ("CAM_Approach", (*site._gpt(18.0, -8.0), 1.7), (0, 0, 24), 24),   # from the garden, under the sign
         ("CAM_Pitch", (0, -30, 1.7), (0, 60, 22), 18),
     ]
     # sign on the south-west walkway, with the sails behind it
@@ -97,9 +97,6 @@ def build(root):
                                    math.sin(sa) * KV_DIST + math.sin(sa + math.pi / 2) * KV_SIDE, KV_Z),
                  (math.cos(sa) * KV_AIM, math.sin(sa) * KV_AIM, 0.0), KV_LENS))
     for name, loc, target, lens in hero:
-        if name == "CAM_Approach":
-            x, y, _ = loc
-            loc = (x * 1.75, y * 1.75, 1.7)   # down the palm avenue
         _camera(name, coll, loc, target, lens)
     scene.camera = bpy.data.objects["CAM_Aerial_SW"]
 

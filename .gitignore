@@ -19,3 +19,5 @@ web/public/basis/
 .superpowers/
 web/public/fonts/AktivGrotesk_*
 web/public/brand/*.png
+# licensed font, converted locally from web/public/fonts (not redistributed)
+blender/fonts/

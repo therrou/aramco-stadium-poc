@@ -20,6 +20,9 @@ SEAT_FOV = 62.0       # degrees, horizontal
 SAMPLE_SECTIONS = ("101", "112", "123", "134", "201", "212", "301", "306", "312", "323")
 
 
+# CAM_KeyVisual framing along the sign axis: eye distance / sideways offset / height, aim point, lens (mm)
+KV_DIST, KV_SIDE, KV_Z, KV_AIM, KV_LENS = 300.0, -20.0, 150.0, 10.0, 33.0
+
 EXPOSURE = {"Sign": -0.2, "Aerial": -0.4, "Top": -0.4, "Approach": -0.25, "Pitch": 0.1, "Bowl": 0.05, "Seat": 0.1}
 
 
@@ -89,6 +92,10 @@ def build(root):
     sx, sy = site._podium_edge(sa)
     hero.append(("CAM_Sign", (sx + math.cos(sa) * 90, sy + math.sin(sa) * 90, 24),
                  (sx * 0.9, sy * 0.9, 20), 30))
+    # the HD key visual (refs/HD-aramcostadiumannouncementpr.webp): high over the sign, looking down the axis
+    hero.append(("CAM_KeyVisual", (math.cos(sa) * KV_DIST + math.cos(sa + math.pi / 2) * KV_SIDE,
+                                   math.sin(sa) * KV_DIST + math.sin(sa + math.pi / 2) * KV_SIDE, KV_Z),
+                 (math.cos(sa) * KV_AIM, math.sin(sa) * KV_AIM, 0.0), KV_LENS))
     for name, loc, target, lens in hero:
         if name == "CAM_Approach":
             x, y, _ = loc

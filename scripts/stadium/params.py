@@ -30,17 +30,20 @@ VOM_ROWS = (9, 15)
 VOM_W = 3.4
 
 # --- roof / sail shell ---------------------------------------------------
-OCULUS_A, OCULUS_B, OCULUS_N = 76.0, 63.0, 2.35
+OCULUS_A, OCULUS_B, OCULUS_N = 66.0, 51.0, 2.35   # v5: tighter ring, about pitch size (HD key visual)
 SHELL_A, SHELL_B, SHELL_N = 138.0, 121.0, 2.25
-SHELL_Z_TOP = 56.0           # compression ring / oculus rim height
+SHELL_Z_TOP = 58.0           # compression ring / oculus rim height
 PODIUM_Z = 9.0               # elevated walkway level; shell lands here
 SHELL_THETA_MAX = math.radians(97.0)
 SAIL_COUNT = 16                # broad lobes (refs/v4/announcement.jpg)
-SAIL_TWIST = math.radians(55.0)   # CCW (seen from above) from oculus to base (user-confirmed vs key visuals)
-SAIL_TWIST_EXP = 0.5              # < 1: the twist happens near the oculus, seams run radial at the base
+SAIL_TWIST = math.radians(60.0)   # CCW (seen from above) from oculus to base (user-confirmed vs key visuals)
+SAIL_TWIST_EXP = 2.5              # twist = T * (1 - (1 - t)^EXP): swirls near the oculus, seams run
+                                  # almost straight down at the base (refs/HD-aramcostadiumannouncementpr.webp)
 SAIL_LIFT_TRAILING = True         # each sail covers its clockwise neighbour (user: layers overlap CW)
 SAIL_OVERLAP = 0.16               # fraction of pitch each sail overlaps next
-SAIL_GAP_MAX = 7.0                # vent opening at the base (m)
+SAIL_GAP_TOP = 7.0                # lifted-edge step mid-way up: the wide lit green seam (m)
+SAIL_GAP_BASE = 2.2               # ... narrowing to almost nothing where the seam meets a foot
+SAIL_ARCH_H = 9.0                 # arch between two feet, above the deck (m): one storey of glazed concourse
 SAIL_THICK = 0.45
 
 # --- site ----------------------------------------------------------------

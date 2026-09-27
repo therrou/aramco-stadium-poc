@@ -17,11 +17,9 @@ from . import common as C
 from . import params as P
 from . import signage
 
-_CM = -abs(math.cos(P.SHELL_THETA_MAX)) ** 0.62
+SHOULDER = 0.8    # < 1 fills out the dome's shoulder (v5: rounder, onion-like, no flat top)
+_CM = -abs(math.cos(P.SHELL_THETA_MAX)) ** SHOULDER
 ZB = (P.PODIUM_Z - P.SHELL_Z_TOP * _CM) / (1 - _CM)
-
-
-SHOULDER = 0.62   # < 1 fills out the dome's shoulder (renders look puffy)
 
 
 def height(theta):
@@ -51,13 +49,37 @@ def normal(phi, theta, h=1e-4):
     return n
 
 
-SAIL_ARCH = 0.22   # fraction of theta the leading edge is trimmed at the base
-SAIL_GAP_MIN = 1.8  # lifted-edge step at the oculus: the lit seam reads all the way up
-SAIL_PILLOW = 4.5  # extra cross-width bulge (m) toward the base: puffy lobes
+SAIL_PILLOW = 5.0  # extra cross-width bulge (m): pumpkin-segment lobes with deep seams
+
+
+def pillow(tv):
+    """Bulge profile along a sail (tv 0 oculus .. 1 base): fullest at ~70% down, tucking in toward
+    the feet so each lobe curls under onto its pointed foot (HD key visual)."""
+    return 0.8 + SAIL_PILLOW * tv ** 0.6 * (1 - 0.55 * max(0.0, (tv - 0.72) / 0.28) ** 2)
 
 
 def twist(theta):
-    return P.SAIL_TWIST * (theta / P.SHELL_THETA_MAX) ** P.SAIL_TWIST_EXP
+    t = min(max(theta / P.SHELL_THETA_MAX, 0.0), 1.0)
+    return P.SAIL_TWIST * (1 - (1 - t) ** P.SAIL_TWIST_EXP)
+
+
+def theta_at_z(z):
+    """Inverse of height() on [0, SHELL_THETA_MAX] (height falls monotonically with theta)."""
+    lo, hi = 0.0, P.SHELL_THETA_MAX
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        if height(mid) > z:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+def sail_foot(e):
+    """Height (m) of a sail's lower edge across its width, e = 0 at its foot .. 1 at its lifted edge.
+    It lands on the deck at the foot, arches one storey over the concourse and comes back down onto
+    the neighbour's foot, so every seam ends in a point on the deck (HD key visual)."""
+    return P.PODIUM_Z + P.SAIL_ARCH_H * math.sin(math.pi * e) ** 0.55 + 1.0 * e ** 3
 
 
 def roof_z_at(x, y):
@@ -76,14 +98,14 @@ LED_FADE_Z = 50.0     # ... thinning out to none by here, clear of the oculus (k
 
 
 def _skin_material():
-    """Smooth pearl-silver metal skin, one uniform finish (key visuals show no
-    visible panel pattern). Night: LED points on the lower two thirds only."""
+    """Matte white membrane (v5, HD key visual: soft fabric, no chrome), one uniform finish.
+    Night: LED points on the lower two thirds only."""
     mat = C.new_material("M_SailSkin")
     nt, b = mat.node_tree, C.bsdf_of(mat)
-    b.inputs["Base Color"].default_value = (0.86, 0.87, 0.89, 1)
-    b.inputs["Metallic"].default_value = 0.9
-    b.inputs["Coat Weight"].default_value = 0.35       # pearly clear-coat sheen
-    b.inputs["Coat Roughness"].default_value = 0.08
+    b.inputs["Base Color"].default_value = (0.9, 0.9, 0.9, 1)
+    b.inputs["Metallic"].default_value = 0.0
+    b.inputs["Sheen Weight"].default_value = 0.25       # soft fabric sheen at grazing angles
+    b.inputs["Coat Weight"].default_value = 0.0
     geo = nt.nodes.new("ShaderNodeNewGeometry")
     sep = nt.nodes.new("ShaderNodeSeparateXYZ")
     nt.links.new(geo.outputs["Position"], sep.inputs[0])
@@ -93,8 +115,8 @@ def _skin_material():
     noise.inputs["Detail"].default_value = 2
     nt.links.new(geo.outputs["Position"], noise.inputs["Vector"])
     rough = nt.nodes.new("ShaderNodeMapRange")
-    rough.inputs["To Min"].default_value = 0.2
-    rough.inputs["To Max"].default_value = 0.28
+    rough.inputs["To Min"].default_value = 0.5
+    rough.inputs["To Max"].default_value = 0.6
     nt.links.new(noise.outputs["Fac"], rough.inputs["Value"])
     nt.links.new(rough.outputs[0], b.inputs["Roughness"])
 
@@ -121,7 +143,7 @@ def _skin_material():
     strength = C.math_node(nt, "MULTIPLY", led, C.math_node(nt, "MULTIPLY", C.night_node(nt), 40.0))
     b.inputs["Emission Color"].default_value = (0.75, 0.92, 1.0, 1)
     nt.links.new(strength, b.inputs["Emission Strength"])
-    mat.diffuse_color = (0.86, 0.87, 0.89, 1)
+    mat.diffuse_color = (0.9, 0.9, 0.9, 1)
     _add_translucency(mat, 0.35, (0.9, 0.93, 0.95))
     return mat
 
@@ -144,10 +166,11 @@ def _add_translucency(mat, fac, color):
 
 
 def _under_material():
-    """Cream underside of each sail; glows warm at night, stronger near the base."""
-    mat = C.principled("M_SailUnder", (0.7, 0.8, 0.78), rough=0.55)
+    """Underside and rims of each sail: the lit lime-green seams of the HD key visual (lit from golden
+    hour on), stronger near the base."""
+    mat = C.principled("M_SailUnder", (0.72, 0.85, 0.55), rough=0.55)
     nt, b = mat.node_tree, C.bsdf_of(mat)
-    b.inputs["Emission Color"].default_value = (0.3, 0.95, 0.75, 1)   # teal-mint glow (key visuals)
+    b.inputs["Emission Color"].default_value = (0.62, 1.0, 0.35, 1)   # lime green (HD key visual)
     geo = nt.nodes.new("ShaderNodeNewGeometry")
     sep = nt.nodes.new("ShaderNodeSeparateXYZ")
     nt.links.new(geo.outputs["Position"], sep.inputs[0])
@@ -173,6 +196,7 @@ def _sails(coll, skin, under):
     for k in range(P.SAIL_COUNT):
         phi0 = k * pitch
         grid, uvs = [], []
+        th_low = [theta_at_z(sail_foot(1 - i / ns if P.SAIL_LIFT_TRAILING else i / ns)) for i in range(ns + 1)]
         for j in range(nt_ + 1):
             v = j / nt_
             row = []
@@ -180,13 +204,14 @@ def _sails(coll, skin, under):
                 s = i / ns
                 # lifted side stops higher -> arched opening under the lifted edge
                 e = 1 - s if P.SAIL_LIFT_TRAILING else s
-                th = P.SHELL_THETA_MAX * v * (1 - SAIL_ARCH * e ** 2)
+                th = th_low[i] * v
                 phi = phi0 + twist(th) + s * width
                 px, py, pz = surface(phi, th)
                 nx, ny, nz = normal(phi, th)
                 tv = th / P.SHELL_THETA_MAX
-                g = SAIL_GAP_MIN + (P.SAIL_GAP_MAX - SAIL_GAP_MIN) * math.sin(math.pi * min(tv / 0.8, 1.0) / 2) ** 2
-                lift = g * e ** 1.35 + (1.0 + SAIL_PILLOW * tv ** 0.6) * math.sin(math.pi * s) ** 0.8
+                # seam step: closes at the oculus (clean rim), widest mid-way, GAP_BASE at the feet
+                g = 0.5 + (P.SAIL_GAP_TOP - 0.5) * math.sin(math.pi * tv) ** 0.7 + P.SAIL_GAP_BASE * tv ** 3
+                lift = g * e ** 1.35 + pillow(tv) * math.sin(math.pi * s) ** 0.8
                 row.append((px + nx * lift, py + ny * lift, pz + nz * lift))
             grid.append(row)
         # UVs in metres: u across (arc length along s), v along theta
@@ -487,6 +512,67 @@ def _concourse(coll, d_back, plan):
     return d_wall
 
 
+BASE_GLASS_INSET = 3.2   # glazed concourse wall this far inside the sails' footprint (m)
+
+
+def foot_phi(k):
+    """Plan angle of sail k's foot (where its lower edge lands on the deck)."""
+    pitch = 2 * math.pi / P.SAIL_COUNT
+    s = 1.0 if P.SAIL_LIFT_TRAILING else 0.0
+    return k * pitch + twist(P.SHELL_THETA_MAX) + s * pitch * (1 + P.SAIL_OVERLAP)
+
+
+def _base_glazing(coll, steel):
+    """Level-2 concourse glazing right behind the sails' feet, seen through each arch (HD key visual):
+    warm-lit glass with vertical fins, a transom, and a V-column under every foot."""
+    glass = C.new_material("M_BaseGlass")
+    b = C.bsdf_of(glass)
+    b.inputs["Base Color"].default_value = (0.55, 0.52, 0.45, 1)
+    b.inputs["Roughness"].default_value = 0.12
+    b.inputs["Metallic"].default_value = 0.3
+    C.night_emission(glass, (1.0, 0.8, 0.55), 0.35, 3.0)     # interior light reads even at golden hour
+    n = 720
+    pts, nrm = [], []
+    for i in range(n):
+        phi = 2 * math.pi * i / n
+        x, y, _ = surface(phi, P.SHELL_THETA_MAX)
+        r = math.hypot(x, y)
+        pts.append((x * (r - BASE_GLASS_INSET) / r, y * (r - BASE_GLASS_INSET) / r))
+    for i in range(n):
+        (x0, y0), (x1, y1) = pts[i - 1], pts[(i + 1) % n]
+        ln = math.hypot(x1 - x0, y1 - y0) or 1.0
+        nrm.append(((y1 - y0) / ln, -(x1 - x0) / ln))
+    top = P.PODIUM_Z + P.SAIL_ARCH_H + 2.5
+    C.sweep(pts, nrm, [(0.0, P.PODIUM_Z), (0.0, top)], "Base_Glazing", coll, [glass])
+    C.sweep(pts, nrm, [(0.0, top), (0.6, top), (0.6, top + 0.5), (-4.0, top + 0.5)],
+            "Base_Soffit", coll, [steel])
+    # mullion fins every ~2.4 m and a transom at 3.6 m
+    fv, fe = [], []
+    step = max(1, round(2.4 / (2 * math.pi * 130 / n)))
+    for i in range(0, n, step):
+        x, y = pts[i]
+        nx, ny = nrm[i]
+        fv += [(x + nx * 0.15, y + ny * 0.15, P.PODIUM_Z), (x + nx * 0.15, y + ny * 0.15, top)]
+        fe.append((len(fv) - 2, len(fv) - 1))
+    fins = C.mesh_object("Base_Fins", fv, [], coll, edges=fe)
+    C.tube_modifier(fins, 0.09, steel, 4)
+    C.sweep(pts, nrm, [(0.1, P.PODIUM_Z + 3.5), (0.35, P.PODIUM_Z + 3.5), (0.35, P.PODIUM_Z + 3.7),
+                       (0.1, P.PODIUM_Z + 3.7)], "Base_Transom", coll, [steel], closed_profile=True)
+    # V-columns: two struts from one deck point up to the sail's underside either side of each foot
+    cv, ce = [], []
+    for k in range(P.SAIL_COUNT):
+        phi = foot_phi(k)
+        x, y, _ = surface(phi, P.SHELL_THETA_MAX)
+        r = math.hypot(x, y)
+        bx, by = x * (r - 1.6) / r, y * (r - 1.6) / r
+        for dphi in (-0.045, 0.045):
+            tx, ty, tz = surface(phi + dphi, theta_at_z(P.PODIUM_Z + P.SAIL_ARCH_H * 0.8))
+            cv += [(bx, by, P.PODIUM_Z), (tx * 0.985, ty * 0.985, tz)]
+            ce.append((len(cv) - 2, len(cv) - 1))
+    cols = C.mesh_object("Base_VColumns", cv, [], coll, edges=ce)
+    C.tube_modifier(cols, 0.35, steel, 8)
+
+
 def build(root):
     coll = C.collection("Shell", root)
     skin, under = _skin_material(), _under_material()
@@ -497,6 +583,7 @@ def build(root):
     d_back, _, plan = _louvres(coll, steel)
     screens = _screens(coll, d_back, plan)
     d_wall = _concourse(coll, d_back, plan)
+    _base_glazing(coll, steel)
     # lighting.py reads these to place spot lamps
     import bpy
     bpy.context.scene["_flood_spots"] = [[*c, *d] for c, d in spots]

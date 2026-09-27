@@ -21,7 +21,7 @@ SAMPLE_SECTIONS = ("101", "112", "123", "134", "201", "212", "301", "306", "312"
 
 
 # CAM_KeyVisual framing along the sign axis: eye distance / sideways offset / height, aim point, lens (mm)
-KV_DIST, KV_SIDE, KV_Z, KV_AIM, KV_LENS = 265.0, -15.0, 125.0, 30.0, 33.0
+KV_DIST, KV_SIDE, KV_Z, KV_AIM, KV_LENS = 275.0, -15.0, 125.0, 62.0, 33.0
 
 EXPOSURE = {"Sign": -0.2, "Aerial": -0.4, "Top": -0.4, "Approach": -0.25, "Pitch": 0.1, "Bowl": 0.05, "Seat": 0.1}
 
@@ -84,7 +84,7 @@ def build(root):
         ("CAM_Aerial_E", (520, 120, 260), (0, 0, 15), 45),
         ("CAM_Aerial_Dusk", (430, -250, 150), (-10, 25, 10), 30),   # key-visual framing into the sunset
         ("CAM_Top", (0, 0.01, 820), (0, 0, 0), 50),
-        ("CAM_Approach", (*site._gpt(18.0, -8.0), 1.7), (0, 0, 24), 24),   # from the garden, under the sign
+        ("CAM_Approach", (*site._gpt(site.APPROACH_T, site.APPROACH_W), 1.7), (0, 0, 24), 24),   # garden
         ("CAM_Pitch", (0, -30, 1.7), (0, 60, 22), 18),
     ]
     # sign on the south-west walkway, with the sails behind it

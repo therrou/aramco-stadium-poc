@@ -15,7 +15,7 @@ import sys
 import numpy as np
 from PIL import Image
 
-OCULUS = (76.0, 63.0, 2.35)                             # params.OCULUS_A/B/N
+OCULUS = (66.0, 51.0, 2.35)                             # params.OCULUS_A/B/N (v5)
 LUMA = np.array([0.2126, 0.7152, 0.0722])
 # lightingState.sunStrength / sunToward elevation / sunColor, treeLight TREE_AMBIENT (x (0.8, 0.87, 1) tint)
 # and the flood term the web adds on top (treeLight FLOOD.irradiance x n, not scaled by bowl)

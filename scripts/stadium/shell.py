@@ -456,7 +456,7 @@ def _screens(coll, d_back, plan):
         back = [(px + nx * 0.8, py + ny * 0.8, pz) for px, py, pz in v]
         return v, back, (nx, ny, tx, ty)
 
-    for deg in (0, 50, 130, 180, 230, 310):
+    for deg in (0, 40, 140, 180, 220, 320):      # v5: corners 10 deg further out, clear of CAM_Bowl (306)
         # slide along the bowl (up to 12 deg) until the screen box clears the roof trusses and bracing
         # first fit, in order of preference: slide along the bowl (<= 6 deg), hang further in toward the pitch
         # (the roof rises inward), a little lower, then smaller. Corners: trusses ~11 deg apart, screen ~16 deg.

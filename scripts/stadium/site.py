@@ -511,6 +511,7 @@ def _gpt(t, w):
     return ox + ux * t + vx * w, oy + uy * t + vy * w
 
 
+APPROACH_T, APPROACH_W = 21.0, -30.0              # CAM_Approach: garden's outer-left edge, eye height
 GARDEN_PAVILION = (4.0, 4.0, 40.0, 6.0, 0.45)   # (t, w, length, width, rotation rad) - the lit glass box
 GARDEN_BEDS = [(-4.0, -18.0, 12.0), (12.0, -4.0, 9.0), (8.0, 20.0, 9.0), (-10.0, 12.0, 6.0)]   # (t, w, r)
 KIOSKS = [(-12.0, -40.0, 0.3), (-14.0, 38.0, -0.4), (14.0, 44.0, 0.2), (18.0, -38.0, 1.3), (-2.0, 52.0, 0.9)]
@@ -1062,9 +1063,16 @@ def build(root):
     gx0, gx1 = min(p[0] for p in garden), max(p[0] for p in garden)
     gy0, gy1 = min(p[1] for p in garden), max(p[1] for p in garden)
 
+    beds = [(*_gpt(t, w), r_) for t, w, r_ in GARDEN_BEDS]
+    APPROACH_EYE = _gpt(APPROACH_T, APPROACH_W)
+
     def on_garden(r):
         x, y = r.uniform(gx0, gx1), r.uniform(gy0, gy1)
         if not in_polygon((x, y), garden) or _in_pitch(x, y, 1.5):
+            return None
+        if any(math.hypot(x - bx, y - by) < r_ * 1.25 for bx, by, r_ in beds):
+            return None
+        if math.hypot(x - APPROACH_EYE[0], y - APPROACH_EYE[1]) < 22.0:   # CAM_Approach stands here
             return None
         return (x, y, 0.0)
 

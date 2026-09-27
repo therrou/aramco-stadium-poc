@@ -60,3 +60,20 @@ describe("?state= param (fix round 1)", () => {
     expect(parseLighting("")).toBe(initialState.lighting);
   });
 });
+
+describe("ticketing: companion seat", () => {
+  const a = { section: 101, row: 6, seat: 7 }, b = { section: 101, row: 6, seat: 8 };
+  it("adds and removes a seat next to the chosen one, only in seat view", () => {
+    expect(reduce(initialState, { type: "extra", seat: b })).toBe(initialState);
+    const s1 = reduce(initialState, { type: "seat", seat: a });
+    const s2 = reduce(s1, { type: "extra", seat: b });
+    expect(s2.view).toEqual({ kind: "seat", seat: a, extra: b });
+    expect(reduce(s2, { type: "extra", seat: b })).toBe(s2);
+    expect(reduce(s2, { type: "extra", seat: null }).view).toEqual({ kind: "seat", seat: a });
+  });
+  it("takes a pair in one step, and a plain seat action drops the companion", () => {
+    const s = reduce(initialState, { type: "seat", seat: a, extra: b });
+    expect(s.view).toEqual({ kind: "seat", seat: a, extra: b });
+    expect(reduce(s, { type: "seat", seat: a }).view).toEqual({ kind: "seat", seat: a });
+  });
+});

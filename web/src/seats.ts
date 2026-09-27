@@ -69,22 +69,30 @@ export function seatGeometryHi() {
 /** Selected-seat highlight opacity, 1.2 s period. */
 export const pulse = (t: number) => 0.625 + 0.275 * Math.sin((t * 2 * Math.PI) / 1.2);
 
-/** A slightly larger white seat drawn over the selected one, pulsing (spec part 2). */
+/** A slightly larger white seat drawn over each selected one (the seat, plus a companion seat), pulsing (spec part 2). */
 export class SeatHighlight {
-  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+  mesh: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   private scale = new THREE.Matrix4().makeScale(1.08, 1.08, 1.08);
-  constructor() {
-    this.mesh = new THREE.Mesh(seatGeometryHi(), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false }));
-    this.mesh.matrixAutoUpdate = false;
+  constructor(max = 2) {
+    this.mesh = new THREE.InstancedMesh(seatGeometryHi(), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false }), max);
+    this.mesh.frustumCulled = false;
     this.mesh.visible = false;
     this.mesh.renderOrder = 1;
   }
-  set(m: THREE.Matrix4 | null) {
-    this.mesh.visible = m !== null;
-    if (m) { this.mesh.matrix.copy(m).multiply(this.scale); this.mesh.matrixWorldNeedsUpdate = true; }
+  set(m: THREE.Matrix4 | null | THREE.Matrix4[]) {
+    const ms = (Array.isArray(m) ? m : m ? [m] : []).slice(0, this.mesh.instanceMatrix.count);
+    this.mesh.visible = ms.length > 0;
+    this.mesh.count = ms.length;
+    const t = new THREE.Matrix4();
+    ms.forEach((x, i) => this.mesh.setMatrixAt(i, t.copy(x).multiply(this.scale)));
+    this.mesh.instanceMatrix.needsUpdate = true;
   }
   update(t: number) { this.mesh.material.opacity = pulse(t); }
 }
+
+/** Ticketing tints (linear): sold seats of the section in focus go dark; the buyer's own seats are always gold. */
+export const SOLD_RGB: [number, number, number] = [0.03, 0.035, 0.05];
+export const MINE_RGB: [number, number, number] = [0.95, 0.62, 0.08];
 
 /** Sections whose centroid is within `dist` of the camera (Blender coords). `always` stays visible. */
 export function visibleSections(camB: V3, sections: Section[], dist: number, always = -1) {
@@ -103,6 +111,7 @@ export class SeatField {
   near: THREE.InstancedMesh;
   private matrices: Float32Array;
   private colors: Float32Array;
+  private base: Float32Array;
   private visible: Set<number> | null = null;   // null: nothing applied yet (the first call must not early-out)
   private nearIds = new Set<number>();
   private tierOf = new Map<number, Tier>();
@@ -128,8 +137,22 @@ export class SeatField {
       this.mesh.setColorAt(i, tierAlbedo(this.tierOf.get(t.section[i]) ?? "Lower", c));   // A6 (v2)
     }
     this.colors = (this.mesh.instanceColor!.array as Float32Array).slice();
+    this.base = this.colors.slice();
     this.near.setColorAt(0, c);                        // allocates the near mesh's instance colours
     this.setVisibleSections(new Set());
+  }
+  /**
+   * Ticketing: seat status per seats.bin index (0 free, 1 sold, 2 mine). Sold seats darken only in `focus`
+   * sections, so the key visual keeps its colours; the buyer's seats are gold everywhere.
+   */
+  setStatus(status: Uint8Array, focus: Set<number>) {
+    this.colors.set(this.base);
+    for (let i = 0; i < this.t.count; i++) {
+      const st = status[i];
+      if (st === 2) this.colors.set(MINE_RGB, i * 3);
+      else if (st === 1 && focus.has(this.t.section[i])) this.colors.set(SOLD_RGB, i * 3);
+    }
+    this.visible = null;                               // refill the packed buffers on the next setVisibleSections
   }
   /** Instance matrix of seat index i (seats.bin order). */
   matrixOf(i: number, out = new THREE.Matrix4()) { return out.fromArray(this.matrices, i * 16); }

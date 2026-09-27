@@ -15,7 +15,7 @@ import { isInside } from "./route";
 import { cameraPose, seatViewPose, SEAT_EXP, type Pose } from "./flyto";
 import { nearestSeatToRay } from "./seatPick";
 import { DepthProbe, acceptPatchHit, onClick } from "./picking";
-import { reduce, initialState, parseLighting, type Action, type AppState } from "./state";
+import { reduce, initialState, parseLighting, sameSeat, type Action, type AppState } from "./state";
 import { STATES, type State } from "./loader";
 import { GROUND_RE, setupStadiumMaterials, specOccK, type SharedUniforms } from "./stadium";
 import { Lighting, makeComposer } from "./lighting";
@@ -30,6 +30,9 @@ import { renderHeader } from "./ui/header";
 import { Sidebar } from "./ui/sidebar";
 import { Controls } from "./ui/controls";
 import { Tooltip } from "./ui/tooltip";
+import { Checkout } from "./ui/checkout";
+import { Availability, SeatStatus } from "./ticketing";
+import { TicketStore } from "./tickets";
 
 loadDisplayFont();   // licensed display font, from the asset base (theme.css no longer references it)
 
@@ -131,6 +134,8 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const tierOf = new Map(a.sections.sections.map((s) => [Number(s.id), s.tier as Tier]));
   const patches = new SectionPatches(table, idx, lighting.outdoor, (id) => tierOf.get(id));
   const highlight = new SeatHighlight();
+  // ticketing (user request 2026-09-27): seeded sold seats plus this browser's purchases (localStorage)
+  const store = new TicketStore(), av = new Availability(dir, a.sections.sections, store.all());
   scene.add(seats.mesh, seats.near, patches.mesh, highlight.mesh);
   // seats sit inside the shell, where the live shadow is not read (S2): they neither cast nor receive, and
   // they live on the bowl-only layer the plaza's mirror pass skips (final review 5)
@@ -166,6 +171,11 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
 
   let app: AppState = { ...initialState, lighting: startState, inside: isInside(rig.pose().eye) };
   const seatPose = (r: SeatRef) => seatViewPose(dir.position(dir.find(r)));
+  /** Looking at a section from above the pitch in front of it, close enough that its seats are drawn. */
+  const sectionPose = (id: number): Pose => {
+    const c = a.sections.sections.find((s) => Number(s.id) === id)!.centroid;
+    return pivotOf({ eye: [c[0] * 0.25, c[1] * 0.25, c[2] + 20], target: c, hfov: 55 });
+  };
   const syncUrl = () => {
     const u = new URL(location.href);
     if (app.view.kind === "seat") u.searchParams.set("seat", formatSeat(app.view.seat)); else u.searchParams.delete("seat");
@@ -174,29 +184,55 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   const enterSeat = (r: SeatRef, fly: boolean) => {
     rig.setMode("look");
     if (fly) rig.flyTo(seatPose(r), SEAT_EXP); else rig.jump(seatPose(r), SEAT_EXP);
-    highlight.set(seats.matrixOf(dir.find(r)));
   };
+  const syncHighlight = () => highlight.set(app.view.kind === "seat"
+    ? [app.view.seat, app.view.extra].filter((r): r is SeatRef => !!r).map((r) => seats.matrixOf(dir.find(r))) : null);
   const dispatch = (act: Action) => {
     const prev = app;
     app = reduce(app, act);
     if (app === prev) return;
-    if (act.type === "seat" && app.view.kind === "seat") { controls.clearCamera(); enterSeat(app.view.seat, true); }
+    if (act.type === "seat" && app.view.kind === "seat" && !(prev.view.kind === "seat" && sameSeat(prev.view.seat, app.view.seat))) {
+      controls.clearCamera(); enterSeat(app.view.seat, true);
+    }
     if (act.type === "back" || act.type === "camera") {
       rig.setMode("orbit");
-      highlight.set(null);
       const c = act.type === "camera" ? a.cameras[act.camera] : undefined;
       if (act.type === "back") controls.clearCamera();
       rig.flyTo(c ? pivotOf(cameraPose(c)) : overview, c?.exposure ?? overviewExp);
     }
     if (act.type === "lighting") lighting.request(app.lighting);
     rig.setAutoOrbit(app.autoOrbit);
+    syncHighlight();
     syncUrl();
     draw();
   };
 
   renderHeader(document.getElementById("header")!, a.sections.seats_total);
-  const sidebar = new Sidebar(document.getElementById("sidebar")!, dir, a.sections.sections, {
-    seeView: (r) => dispatch({ type: "seat", seat: r }),
+  const cart = () => app.view.kind === "seat" ? [app.view.seat, app.view.extra].filter((r): r is SeatRef => !!r && av.at(r) === SeatStatus.Free) : [];
+  const checkout = new Checkout(document.getElementById("checkout")!, {
+    paid: (bought, name, email) => {
+      store.add(bought.map(({ section, row, seat, price }) => ({ section, row, seat, price, name, email, at: Date.now() })));
+      av.setMine(store.all());
+      if (app.view.kind === "seat" && app.view.extra) dispatch({ type: "extra", seat: null });
+      draw();
+    },
+    closed: () => {},
+  });
+  const sidebar = new Sidebar(document.getElementById("sidebar")!, dir, a.sections.sections, av, () => store.all(), {
+    seeView: (r, extra) => dispatch({ type: "seat", seat: r, extra }),
+    section: (id) => {
+      if (id === null) return;
+      if (app.view.kind === "seat") dispatch({ type: "back" });
+      controls.clearCamera();
+      rig.setMode("orbit");
+      rig.flyTo(sectionPose(id), overviewExp);
+    },
+    extra: (r) => dispatch({ type: "extra", seat: r }),
+    buy: () => {
+      const seatsInCart = cart();
+      if (seatsInCart.length) checkout.open(seatsInCart.map((r) => ({ ...r, price: av.price(r), tier: tierOf.get(r.section) ?? "Lower" })));
+    },
+    resetTickets: () => { store.clear(); av.setMine([]); draw(); },
     hero: (cam) => dispatch({ type: "camera", camera: cam }),
     back: () => dispatch({ type: "back" }),
     copyLink: () => { navigator.clipboard?.writeText(location.href).then(() => sidebar.linkCopied(), () => {}); },
@@ -229,23 +265,27 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     const r = dom.getBoundingClientRect();
     return { ndc: new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), x: e.clientX - r.left, y: e.clientY - r.top };
   };
-  let hover: ReturnType<typeof toNdc> | null = null, lastHover = 0, dragging = false;
+  let hover: ReturnType<typeof toNdc> | null = null, lastHover = 0, dragging = false, hoverSection = -1;
   dom.addEventListener("pointermove", (e) => { hover = e.pointerType === "mouse" ? toNdc(e) : null; });
   dom.addEventListener("pointerdown", () => { dragging = true; hover = null; tooltip.hide(); });
   addEventListener("pointerup", () => (dragging = false));
-  dom.addEventListener("pointerleave", () => { hover = null; tooltip.hide(); });
+  dom.addEventListener("pointerleave", () => { hover = null; hoverSection = -1; tooltip.hide(); });
   onClick(dom, (ndc) => {
     const i = pickSeat(ndc);
-    if (i >= 0) { tooltip.hide(); dispatch({ type: "seat", seat: dir.ref(i) }); }
+    if (i < 0) return;
+    if (av.status[i] === SeatStatus.Sold) return tooltip.nudge();       // sold: no fly-to, the card shakes
+    tooltip.hide();
+    dispatch({ type: "seat", seat: dir.ref(i) });
   });
   addEventListener("keydown", (e) => e.key === "Escape" && dispatch({ type: "back" }));
 
   // deep link (Review Focus 1): only a real seat opens seat view; anything else is the overview
   const linked = parseSeatParam(params.get("seat"));
-  if (linked && dir.find(linked) >= 0) { app = reduce(app, { type: "seat", seat: linked }); enterSeat(linked, false); }
+  if (linked && dir.find(linked) >= 0) { app = reduce(app, { type: "seat", seat: linked }); enterSeat(linked, false); syncHighlight(); }
   else if (params.has("seat")) syncUrl();
   draw();
 
+  let lastTint = "";
   const frame = (dt: number) => {
     rig.update(dt);
     const now = performance.now();
@@ -253,7 +293,9 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     else if (hover && !dragging && now - lastHover >= HOVER_MS) {
       lastHover = now;
       const h = hover, i = pickSeat(h.ndc);
-      if (i >= 0) tooltip.show(h.x, h.y, dir.ref(i), tierOf.get(table.section[i]) ?? "Lower"); else tooltip.hide();
+      hoverSection = i >= 0 ? table.section[i] : -1;
+      if (i >= 0) tooltip.show(h.x, h.y, dir.ref(i), tierOf.get(table.section[i]) ?? "Lower", av.status[i] as SeatStatus, av.price(dir.ref(i)));
+      else tooltip.hide();
       hover = null;                                                          // re-pick only after the pointer moves again
     }
     const inside = isInside(toBlender(camera.position));
@@ -262,6 +304,10 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     // block of real seats among the (lighter, averaged) section patches (user report 2026-09-27)
     const focus = app.view.kind === "seat" && !rig.flying ? app.view.seat.section : -1;
     const vis = visibleSections(toBlender(camera.position), a.sections.sections, SEAT_LOD_DIST, focus);
+    // ticketing: sold seats darken in the sections in focus (open in the sidebar, hovered, or the chosen seat's)
+    const tint = new Set([sidebar.focusSection ?? -1, hoverSection, app.view.kind === "seat" ? app.view.seat.section : -1].filter((x) => x >= 0));
+    const tintKey = [...tint].sort().join(",") + `|${store.all().length}`;
+    if (tintKey !== lastTint) { lastTint = tintKey; seats.setStatus(av.status, tint); }
     seats.setVisibleSections(vis, nearSections(toBlender(camera.position), a.sections.sections, SEAT_NEAR_M, NEAR_SEAT_CAP));
     patches.setHidden(vis);
     highlight.update(now / 1000);

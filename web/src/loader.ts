@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { assetUrl } from "./assetBase";
 import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
 import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js";
 import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
@@ -69,7 +70,7 @@ export async function runJobs<T>(jobs: Job<T>[], onProgress: (f: number) => void
   return done as Map<string, T | null>;
 }
 
-const BASE = "assets/";
+const BASE = assetUrl("assets/");
 const pct = (p: (f: number) => void) => (e: ProgressEvent) => e.total && p(e.loaded / e.total);
 
 export function makeLoaders(renderer: THREE.WebGLRenderer) {

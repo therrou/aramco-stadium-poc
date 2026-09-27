@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { assetUrl } from "./assetBase";
 
 /**
  * v4 (user request): the big screens inside the stadium (shell.py _screens, M_Screen) show a 5 s looping feed
@@ -7,7 +8,7 @@ import * as THREE from "three";
  * at SCREEN.video (muted, looping) replaces it when that file exists. All motion has a period dividing loopS, so
  * the loop is seamless.
  */
-export const SCREEN = { w: 512, h: 210, fps: 15, loopS: 5, adFrom: 3.6, fadeS: 0.25, video: "/brand/screen.mp4" } as const;
+export const SCREEN = { w: 512, h: 210, fps: 15, loopS: 5, adFrom: 3.6, fadeS: 0.25, video: assetUrl("brand/screen.mp4") } as const;
 /** The part of an ad panel (fraction of its width) that carries the type and logo. */
 const AD_CROP = [0.2, 0.82] as const;
 export const isScreen = (name: string) => /^M_Screen\b/.test(name);

@@ -148,3 +148,18 @@ Rendering v2 (Stage A: shader and constant changes against the Cycles references
 remaining Stage B candidates are in `docs/superpowers/reports/2026-09-25-v2-visual-check.md`. The visual check
 tools: `web/scripts/capture.js` (run in the page on the dev server) and `python -m webexport.framestats`.
 The v1 comparison is `docs/superpowers/reports/2026-09-25-visual-check.md`.
+
+## Deployment (Vercel)
+
+The Vercel project `web` (scope *Tomas Herrou's projects*, root directory `web`) builds the viewer from git on
+every push. The heavy files are not in git (`web/public/assets`, `web/public/brand`, `web/public/fonts`), so they
+live in the Vercel Blob store `aramco-stadium-assets`, each export in its own folder, and the build reads their
+base URL from `VITE_ASSET_BASE`. After a new export and `scripts/optimize_web.sh`:
+
+    vercel env pull /tmp/vercel.env --environment development   # BLOB_READ_WRITE_TOKEN
+    set -a; . /tmp/vercel.env; set +a
+    scripts/upload_assets.sh                                     # uploads to v4-<git sha>/, prints VITE_ASSET_BASE
+    # set that value as VITE_ASSET_BASE (Production, Preview) in the Vercel project, then redeploy
+
+Locally `VITE_ASSET_BASE` is unset and everything is served from `web/public`.
+

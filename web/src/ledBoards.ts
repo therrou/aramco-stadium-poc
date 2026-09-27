@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { assetUrl } from "./assetBase";
 
 /**
  * Pitch LED advertising boards (user request 2026-09-25): the style of the LED ribbons at the 2026 World Cup
@@ -93,8 +94,8 @@ function swooshes(g: CanvasRenderingContext2D, y0: number, flip: boolean) {
   band(1560, 120, -160, "#7be07f", 0.5); band(1700, 380, 150, GREEN_DEEP, 0.9); band(820, 60, 120, "#58b8ff", 0.5);
 }
 
-/** Brand files (user-supplied, gitignored like the licensed font): web/public/brand/. */
-export const LOGOS = { aramco: "/brand/aramco_logo.png", akqa: "/brand/akqa_logo.png" } as const;
+/** Brand files (user-supplied, not in git): web/public/brand/ locally, the asset base in production. */
+export const LOGOS = { aramco: assetUrl("brand/aramco_logo.png"), akqa: assetUrl("brand/akqa_logo.png") } as const;
 type Logo = HTMLCanvasElement | HTMLImageElement | null;
 
 /** The aramco wordmark comes black on white (no alpha): its darkness becomes the alpha of a white mark. */
@@ -155,7 +156,7 @@ function drawAkqa(g: CanvasRenderingContext2D, y0: number, logo: Logo) {
 }
 
 const loadImage = (src: string) => new Promise<HTMLImageElement>((ok, fail) => {
-  const i = new Image(); i.onload = () => ok(i); i.onerror = fail; i.src = src;
+  const i = new Image(); i.crossOrigin = "anonymous"; i.onload = () => ok(i); i.onerror = fail; i.src = src;   // CORS: drawn into a texture canvas
 });
 
 /** A dark seam at both ends of every panel, so neighbouring signs read as separate boards (~0.25 m each side). */

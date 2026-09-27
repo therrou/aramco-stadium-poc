@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { loadDisplayFont } from "./assetBase";
 import { missingCapabilities, probe } from "./capabilities";
 import { AssetError, assetJobs, collect, fetchManifest, makeLoaders, runJobs, type Assets } from "./loader";
 import { Perf, exposeViewerHooks } from "./perf";
@@ -28,6 +29,8 @@ import { renderHeader } from "./ui/header";
 import { Sidebar } from "./ui/sidebar";
 import { Controls } from "./ui/controls";
 import { Tooltip } from "./ui/tooltip";
+
+loadDisplayFont();   // licensed display font, from the asset base (theme.css no longer references it)
 
 const params = new URLSearchParams(location.search);
 /** Hover picking interval (ms): ~20 Hz, each pick may draw one depth-probe pixel. */

@@ -1,4 +1,4 @@
-@font-face { font-family: "Aktiv Grotesk"; src: url("/fonts/AktivGrotesk_Blk.woff2") format("woff2"); font-weight: 900; font-display: swap; }
+/* Aktiv Grotesk (licensed, not in git) is registered from JS: assetBase.loadDisplayFont(). */
 :root {
   --navy: #010532; --navy-2: #0a0f45; --white: #ffffff; --muted: rgba(255, 255, 255, 0.6); --muted-solid: #5f6369;
   --green: #00d246; --blue: #1480db; --blue-2: #3860be; --sand: #efe3c8; --line: rgba(255, 255, 255, 0.14);

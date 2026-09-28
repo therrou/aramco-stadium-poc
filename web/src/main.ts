@@ -239,7 +239,6 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   }, heroesIn(a.cameras));
   const controls = new Controls(document.getElementById("controls")!, {
     lighting: (l) => dispatch({ type: "lighting", lighting: l }),
-    zoom: (f) => { if (app.autoOrbit) dispatch({ type: "autoOrbit", on: false }); rig.zoom(f); },
     reset: () => (app.view.kind === "seat" ? rig.flyTo(seatPose(app.view.seat), SEAT_EXP, rig.flying ? {} : { direct: true, seconds: ZOOM_S * 2 }) : rig.flyTo(overview, overviewExp)),
     fullscreen: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()),
     camera: (cam) => dispatch({ type: "camera", camera: cam }),

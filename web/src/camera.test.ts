@@ -150,7 +150,7 @@ describe("seat view look mode", () => {
     expect([c.enablePan, c.enableZoom, c.minDistance, c.autoRotate]).toEqual([false, false, 0, false]);
     expect(c.rotateSpeed).toBeLessThan(0);          // Street View convention: dragging left turns the view right
     rig.setMode("orbit");
-    expect([c.enablePan, c.enableZoom, c.minDistance, c.rotateSpeed]).toEqual([true, true, MIN_DISTANCE_M, 1]);
+    expect([c.enablePan, c.enableZoom, c.minDistance, c.rotateSpeed]).toEqual([true, false, MIN_DISTANCE_M, 1]);   // user 2026-09-28: pan yes, zoom no
   });
 });
 
@@ -225,5 +225,18 @@ describe("orbit pivot of a Blender camera pose", () => {
     const p = pivotOf(cam);
     dir(p).forEach((v, k) => expect(v).toBeCloseTo(dir(cam)[k], 9));
     expect(Math.hypot(...p.target.map((v, k) => v - cam.eye[k]))).toBeGreaterThanOrEqual(MIN_DISTANCE_M);
+  });
+});
+
+describe("zoom disabled (user request 2026-09-28: pan yes, zoom no)", () => {
+  it("the wheel does not change the seat view's field of view", () => {
+    const listeners: Record<string, (e: unknown) => void> = {};
+    const dom = stubDom() as unknown as { addEventListener: (t: string, f: (e: unknown) => void) => void };
+    dom.addEventListener = (t, f) => { listeners[t] = f; };
+    const rig = new CameraRig(dom as unknown as HTMLElement);
+    rig.jump({ eye: [0, -60, 9.2], target: [0, -59.9, 9.18], hfov: 70 });
+    rig.setMode("look");
+    listeners.wheel?.({ deltaY: -500, preventDefault() {} });
+    expect(rig.pose().hfov).toBe(70);
   });
 });

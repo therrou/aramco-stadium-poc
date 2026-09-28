@@ -96,13 +96,8 @@ export class CameraRig {
     this.controls.maxDistance = MAX_DISTANCE_M;
     this.controls.minDistance = MIN_DISTANCE_M;
     this.controls.maxPolarAngle = MAX_POLAR;
-    // seat view: the wheel changes the field of view (dolly is off there)
-    dom.addEventListener("wheel", (e: WheelEvent) => {
-      if (this.mode !== "look" || this.flying) return;
-      e.preventDefault();
-      const p = this.pose();
-      this.apply(zoomedPose(p, Math.exp(e.deltaY * 0.001), "look"));
-    }, { passive: false });
+    // user request 2026-09-28: no zoom anywhere (wheel, pinch, buttons); pan stays in the orbit view
+    this.controls.enableZoom = false;
   }
   get flying() { return this.flight !== null; }
   /**
@@ -112,7 +107,8 @@ export class CameraRig {
   setMode(m: RigMode) {
     this.mode = m;
     const c = this.controls;
-    c.enablePan = c.enableZoom = m === "orbit";
+    c.enablePan = m === "orbit";
+    c.enableZoom = false;                            // user request 2026-09-28: pan yes, zoom no
     c.minDistance = m === "orbit" ? MIN_DISTANCE_M : 0;
     c.rotateSpeed = m === "orbit" ? 1 : -0.35;
     if (m === "look") this.setAutoOrbit(false);

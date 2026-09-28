@@ -104,7 +104,16 @@ export const SAIL_COAT = { clearcoat: 0.5, clearcoatRoughness: 0.06 };
  * mirrors the warm sky and darkens where it faces down. The web makes it part metal: the baked (diffuse) light
  * drops by (1 - metalness) and the sky reflection (env x SAIL_METAL.env) carries the rest. No rebake needed.
  */
-export const SAIL_METAL = { color: [0.8, 0.82, 0.84] as [number, number, number], metalness: 0.6, roughness: 0.3, env: 1.4 };
+export const SAIL_METAL = { color: [0.8, 0.82, 0.84] as [number, number, number], metalness: 0.6, roughness: 0.3, env: 1.4, goldenMetalness: 0.82 };
+/**
+ * User 2026-09-28: night is right as it is; golden hour still read too bright against the key visual, whose
+ * skin is mid silver-grey. Toward golden hour the skin turns more metal, so less flat baked light and more of
+ * the sky reflection (bright up top, dark where it faces the ground). Exactly SAIL_METAL.metalness from n 1.
+ */
+export const sailMetalness = (n: number) => {
+  const t = Math.min(Math.max((n - 0.6) / 0.4, 0), 1), s = t * t * (3 - 2 * t);
+  return SAIL_METAL.goldenMetalness + (SAIL_METAL.metalness - SAIL_METAL.goldenMetalness) * s;
+};
 /** The live sun's highlight on the coat (sailGlint): a bit broader than the coat so the glint reads from afar. */
 export const SAIL_GLINT = { roughness: 0.15, gain: 0.5 };
 
@@ -187,7 +196,9 @@ float sailLeds( vec3 pB ) {
  * the lobes read mint from outside. The web skin is opaque: that transmitted glow is added as emission.
  * k scales it against the Cycles pairs (renders/web_v4).
  */
-export const SAIL_GLOW = { k: 2.2, translucency: 0.35, color: [0.62, 1.0, 0.35] } as const;   // v5: lime, k 1.5 -> 2.2 (HD key visual seams)
+// v5: lime, k 1.5 -> 2.2 (HD key visual seams). User 2026-09-28: k 2.2 -> 0.4, the glow washed the whole skin milky
+// lime at golden hour; in the key visual the lime is in the seams (M_SailUnder), the skin faces stay grey. 0 at night.
+export const SAIL_GLOW = { k: 0.4, translucency: 0.35, color: [0.62, 1.0, 0.35] } as const;
 export const sailGlow = (z: number, n: number) => {
   const h = Math.min(Math.max((z - 9) / 36, 0), 1);
   return SAIL_GLOW.k * SAIL_GLOW.translucency * (1 - n) * n * (3.5 * (1 - h) ** 1.6 + 1);

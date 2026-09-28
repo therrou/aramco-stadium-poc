@@ -7,7 +7,7 @@ import { ENV_ROTATION_Y, toThree } from "./coords";
 import { lateEmission, LightingTransition, emissionStrength, envSizeMismatch, exposure, sunColor, sunStrength, sunToward } from "./lightingState";
 import type { Assets, State } from "./loader";
 import { Sky } from "./background";
-import { SAIL_RE, sailEnvIntensity, specOccK, type SharedUniforms } from "./stadium";
+import { SAIL_RE, sailEnvIntensity, sailMetalness, specOccK, type SharedUniforms } from "./stadium";
 import { clearTreeUniforms, makeTreeUniforms, updateTreeUniforms } from "./treeLight";
 
 /**
@@ -146,7 +146,7 @@ export class Lighting {
     this.shared.uEnvBlend.value = this.envBlend ? e : 0;
     this.shared.uNight.value = n;
     this.shared.uSoK.value = specOccK(n);
-    for (const m of this.sails) m.envMapIntensity = sailEnvIntensity(n);
+    for (const m of this.sails) { m.envMapIntensity = sailEnvIntensity(n); m.metalness = sailMetalness(n); }
     this.sky.setBlend(e);
     for (const m of this.emissive)
       m.emissiveIntensity = emissionStrength(m.userData.emDay ?? 0, m.userData.emNight ?? 0, n) * (m.userData.emLate ? lateEmission(n) : 1);

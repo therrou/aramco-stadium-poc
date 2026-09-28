@@ -15,7 +15,8 @@ export type Action =
   | { type: "inside"; on: boolean }
   | { type: "none" };
 
-export const initialState: AppState = { view: { kind: "overview" }, lighting: "golden", autoOrbit: false, inside: false };
+// user request 2026-09-28: open at night (was golden hour); ?state= still overrides
+export const initialState: AppState = { view: { kind: "overview" }, lighting: "night", autoOrbit: false, inside: false };
 export const sameSeat = (a: SeatRef, b: SeatRef) => a.section === b.section && a.row === b.row && a.seat === b.seat;
 
 const sameOpt = (a?: SeatRef, b?: SeatRef) => (a && b ? sameSeat(a, b) : a === b);

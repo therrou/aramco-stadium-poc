@@ -77,3 +77,9 @@ describe("ticketing: companion seat", () => {
     expect(reduce(s, { type: "seat", seat: a }).view).toEqual({ kind: "seat", seat: a });
   });
 });
+
+it("opens at night unless ?state= says otherwise (user request 2026-09-28)", () => {
+  expect(parseLighting(null)).toBe("night");
+  expect(parseLighting("bogus")).toBe("night");
+  expect(parseLighting("golden")).toBe("golden");
+});

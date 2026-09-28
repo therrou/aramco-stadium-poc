@@ -9,6 +9,7 @@ const doc: SectionsDoc = JSON.parse(readFileSync(new URL("../../data/sections.js
 // Blender cameras (web/public/assets/cameras.json), copied so the tests need no built assets
 const CAM: Record<string, Pose> = {
   aerialSW: { eye: [-330, -470, 230], target: [-276.7634, -392.5649, 195.7995], hfov: 46.4 },
+  keyVisual: { eye: [-166.2136, -219.5974, 125.0], target: [-113.0485, -151.6183, 74.4796], hfov: 57.2209 },   // v5 Exterior
   approach: { eye: [-45.5818, -228.6689, 1.7], target: [-26.1217, -131.0438, 11.2205], hfov: 73.7 },
   seat201: { eye: [-2.03, -68.389, 11.881], target: [0.8671, 29.1754, -9.8628], hfov: 62 },
   top: { eye: [0, 0.01, 820], target: [0, 0.0076, 720], hfov: 39.6 },
@@ -144,7 +145,7 @@ describe("final review fixes (routes)", () => {
       const eye: V3 = [tgt[0] + d * Math.sin(pol) * Math.cos(az), tgt[1] + d * Math.sin(pol) * Math.sin(az), tgt[2] + d * Math.cos(pol)];
       const c = clampOrbit(eye, tgt), from = { eye: c.eye, target: c.target, hfov: 50 };
       expect(blocked(c.eye), `clamped eye ${c.eye.map((v) => v.toFixed(1))}`).toBe(false);
-      for (const to of [seat312, CAM.aerialSW]) { n++; const b = samples(from, to, 100).find((p) => blocked(p.eye)); if (b) { bad++; if (bad <= 4) console.log("BAD", from.eye.map((v) => v.toFixed(1)).join(","), "->", to === seat312 ? "seat" : "aerial", "at", b.eye.map((v) => v.toFixed(1)).join(",")); } }
+      for (const to of [seat312, CAM.aerialSW, CAM.keyVisual]) { n++; const b = samples(from, to, 100).find((p) => blocked(p.eye)); if (b) { bad++; if (bad <= 4) console.log("BAD", from.eye.map((v) => v.toFixed(1)).join(","), "->", to === seat312 ? "seat" : "aerial", "at", b.eye.map((v) => v.toFixed(1)).join(",")); } }
     }
     expect(`${bad}/${n}`).toBe(`0/${n}`);
   });

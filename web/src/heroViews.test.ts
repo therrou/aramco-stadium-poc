@@ -13,3 +13,6 @@ it.skipIf(!existsSync(url))("every CAM_Seat_* camera has a labelled hero view, a
 it("hero list keeps only cameras the assets have", () => {
   expect(heroesIn({ CAM_Seat_201: {} }).map((h) => h.cam)).toEqual(["CAM_Seat_201"]);
 });
+it("Exterior is the key-visual camera (HD key visual framing, v5)", () => {
+  expect(MODE_CAMERAS.find((m) => m.label === "Exterior")?.cam).toBe("CAM_KeyVisual");
+});

@@ -16,7 +16,7 @@ export const HERO_VIEWS: { cam: string; title: string; tier: Tier }[] = [
 /** Bottom mode bar cameras (auto orbit is a separate toggle). */
 export const MODE_CAMERAS = [
   { cam: "CAM_Bowl", label: "Stadium" },
-  { cam: "CAM_Aerial_SW", label: "Exterior" },
+  { cam: "CAM_KeyVisual", label: "Exterior" },   // v5: the HD key visual's view
   { cam: "CAM_Top", label: "Top view" },
 ];
 export const heroesIn = (cameras: Record<string, unknown>) => HERO_VIEWS.filter((h) => h.cam in cameras);

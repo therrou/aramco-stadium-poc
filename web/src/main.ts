@@ -16,7 +16,7 @@ import { cameraPose, seatViewPose, SEAT_EXP, type Pose } from "./flyto";
 import { nearestSeatToRay } from "./seatPick";
 import { DepthProbe, acceptPatchHit, onClick } from "./picking";
 import { reduce, initialState, parseLighting, sameSeat, type Action, type AppState } from "./state";
-import { STATES, type State } from "./loader";
+import type { State } from "./loader";
 import { GROUND_RE, setupStadiumMaterials, specOccK, type SharedUniforms } from "./stadium";
 import { Lighting, makeComposer } from "./lighting";
 import { SunShadow } from "./sunShadow";
@@ -157,7 +157,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets, L: ReturnType<typeof ma
     });
     scene.add(a.trees.scene);
   }
-  // lighter first load (2026-09-28): the other lighting state streams in after the first frame
+  // lighter load (user 2026-09-28): the other lighting state loads only when picked (~6 MB, 1-2 s on first switch)
   const stateLoads = new Map<State, Promise<void>>();
   /** Loads a lighting state once; a failed or incomplete one is dropped so a later request retries it. */
   const loadState = (s: State) => {
@@ -369,11 +369,6 @@ function start(renderer: THREE.WebGLRenderer, a: Assets, L: ReturnType<typeof ma
       const p = rig.pose(), off = toBlender(new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(m));
       rig.jump({ eye: p.eye.map((v, k) => v + off[k]) as V3, target: p.target.map((v, k) => v + off[k]) as V3, hfov: p.hfov });
     } });
-
-  // after the first frame is on screen: the other lighting state (ready before anyone asks)
-  requestAnimationFrame(() => setTimeout(() => {
-    for (const s of STATES) if (s !== startState) loadState(s).catch((e) => console.warn(`Lighting state ${s} failed to load:`, e));
-  }, 0));
 
   // ?dpr=fixed keeps the start pixel ratio (captures, frame-time measurements)
   const dprGov = params.get("dpr") === "fixed" ? null : new DprGovernor(renderer.getPixelRatio());

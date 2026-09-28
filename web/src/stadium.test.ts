@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { BLOOM } from "./lighting";
 import { BOARDS, LED_EMISSIVE_GLSL } from "./ledBoards";
 import { PARS, SIGN, SIGN_RE, sailGlow, PAVING_LIFT_M, PAVING_LIFT_RE, DUGOUT_GLASS, DUGOUT_GLASS_RE, FLOOD_LENS_MAX, LED_CELL, LED_COVER, LED_GLSL, LED_MAX, LED_R, setupStadiumMaterials } from "./stadium";
-import { splitByGroup, GROUND_ENV, OVERLAY_RE, SAIL_NIGHT_ENV, SAIL_RE, envIntensityOf, sailEnvIntensity, SAIL_COAT, SPEC_OCC, SAIL_NIGHT_E, lightsChunkFor, overlayOffset, soMinDefine, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
+import { splitByGroup, GROUND_ENV, OVERLAY_RE, SAIL_METAL, SAIL_NIGHT_ENV, SAIL_RE, envIntensityOf, sailEnvIntensity, SAIL_COAT, SPEC_OCC, SAIL_NIGHT_E, lightsChunkFor, overlayOffset, soMinDefine, patchLightsChunk, specOccK, toCoatedSail } from "./stadium";
 
 it("patches three r186 lights_fragment_maps (lightmap blend, no diffuse IBL, env blend)", () => {
   const out = patchLightsChunk(THREE.ShaderChunk.lights_fragment_maps);
@@ -49,7 +49,7 @@ it("A2: reflection strength by material name; unlisted materials keep 1", () => 
   expect(envIntensityOf("M_GrassX.web")).toBeUndefined();
 });
 it("A5: sail reflections fade toward SAIL_NIGHT_ENV at night", () => {
-  expect(sailEnvIntensity(0)).toBe(1);
+  expect(sailEnvIntensity(0)).toBe(SAIL_METAL.env);
   expect(sailEnvIntensity(1)).toBeCloseTo(SAIL_NIGHT_ENV, 9);
   expect(SAIL_RE.test("M_SailSkin.web")).toBe(true);
   expect(SAIL_RE.test("M_SailUnder.web")).toBe(false);

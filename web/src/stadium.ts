@@ -96,10 +96,17 @@ export function patchLightsChunk(chunk: string) {
     .replace(COAT_RAD_RE, `clearcoatRadiance += mix( getIBLRadiance( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), getIBLRadianceB( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), uEnvBlend ) * lmSo;`);
 }
 
-/** M_SailSkin: pearl metal with a clear coat (Blender coat 0.35, coat roughness 0.08). */
-export const SAIL_COAT = { clearcoat: 0.35, clearcoatRoughness: 0.08 };
+/** M_SailSkin: pearl metal with a clear coat (Blender coat 0.35, coat roughness 0.08; stronger since 2026-09-28). */
+export const SAIL_COAT = { clearcoat: 0.5, clearcoatRoughness: 0.06 };
+/**
+ * User 2026-09-28 (vs the HD key visual): the v5 skin is white fabric in the .blend (albedo 0.9, metalness 0,
+ * roughness 0.55), which read as flat, bright plaster. The key visual's skin is a pale silver metal that
+ * mirrors the warm sky and darkens where it faces down. The web makes it part metal: the baked (diffuse) light
+ * drops by (1 - metalness) and the sky reflection (env x SAIL_METAL.env) carries the rest. No rebake needed.
+ */
+export const SAIL_METAL = { color: [0.8, 0.82, 0.84] as [number, number, number], metalness: 0.6, roughness: 0.3, env: 1.4 };
 /** The live sun's highlight on the coat (sailGlint): a bit broader than the coat so the glint reads from afar. */
-export const SAIL_GLINT = { roughness: 0.15, gain: 1.0 };
+export const SAIL_GLINT = { roughness: 0.15, gain: 0.5 };
 
 export const PARS = /* glsl */ `
 uniform sampler2D uLmB; uniform float uLmBlend; uniform float uRgbmRange; uniform float uLmGamma;
@@ -247,7 +254,7 @@ export const envIntensityOf = (name: string) => ENV_INTENSITY.find(([re]) => re.
 export const SAIL_RE = /^M_SailSkin\b/;
 /** A5 (v2): sail skin reflection at night (Cycles shows dark skin with LEDs, the web mirrored the dusk sky). Tuned in Task 8. */
 export const SAIL_NIGHT_ENV = 1.0;
-export const sailEnvIntensity = (n: number) => 1 + (SAIL_NIGHT_ENV - 1) * n;
+export const sailEnvIntensity = (n: number) => SAIL_METAL.env + (SAIL_NIGHT_ENV - SAIL_METAL.env) * n;
 
 /** glTF gives MeshStandardMaterial (the export writes no coat): swap the sail skin for a physical copy. */
 export function toCoatedSail(m: THREE.MeshStandardMaterial) {
@@ -256,6 +263,9 @@ export function toCoatedSail(m: THREE.MeshStandardMaterial) {
   p.defines = { STANDARD: "", PHYSICAL: "" };             // Standard.copy resets defines
   p.clearcoat = SAIL_COAT.clearcoat;
   p.clearcoatRoughness = SAIL_COAT.clearcoatRoughness;
+  p.color.setRGB(...SAIL_METAL.color);
+  p.metalness = SAIL_METAL.metalness;
+  p.roughness = SAIL_METAL.roughness;
   return p;
 }
 

@@ -152,7 +152,7 @@ it("v4 sail glow: only between day and night, stronger toward the base", () => {
   expect(sailGlow(20, 0)).toBe(0);
   expect(sailGlow(20, 1)).toBe(0);
   expect(sailGlow(12, 0.6)).toBeGreaterThan(sailGlow(50, 0.6));
-  expect(sailGlow(50, 0.6)).toBeCloseTo(1.5 * 0.35 * 0.4 * 0.6, 5);   // top: underside glow 1 x n
+  expect(sailGlow(50, 0.6)).toBeCloseTo(SAIL_GLOW.k * 0.35 * 0.4 * 0.6, 5);   // top: underside glow 1 x n (k: v5 2.2)
 });
 
 it("v4 dugout canopy glass is translucent and daylit, not the dark baked underside", () => {
@@ -183,4 +183,11 @@ it("v4: the sign lights itself evenly, well below its 14x bake emission", () => 
   expect(SIGN_RE.test("M_SignWhite.web")).toBe(true);
   expect(SIGN.emNight).toBeLessThan(4);
   expect(SIGN.lm).toBeLessThan(0.5);
+});
+
+import { EDGE_LED, SAIL_GLOW } from "./stadium";
+it("v5 polish: deck-edge LEDs and golden seams (HD key visual)", () => {
+  expect(EDGE_LED).toEqual({ emDay: 2.5, emNight: 9.0 });
+  expect(SAIL_GLOW.k).toBeCloseTo(2.2, 5);
+  expect(SAIL_GLOW.color).toEqual([0.62, 1.0, 0.35]);
 });

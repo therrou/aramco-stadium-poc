@@ -160,7 +160,7 @@ float sailLeds( vec3 pB ) {
  * the lobes read mint from outside. The web skin is opaque: that transmitted glow is added as emission.
  * k scales it against the Cycles pairs (renders/web_v4).
  */
-export const SAIL_GLOW = { k: 1.5, translucency: 0.35, color: [0.62, 1.0, 0.35] } as const;   // v5: lime (HD key visual)
+export const SAIL_GLOW = { k: 2.2, translucency: 0.35, color: [0.62, 1.0, 0.35] } as const;   // v5: lime, k 1.5 -> 2.2 (HD key visual seams)
 export const sailGlow = (z: number, n: number) => {
   const h = Math.min(Math.max((z - 9) / 36, 0), 1);
   return SAIL_GLOW.k * SAIL_GLOW.translucency * (1 - n) * n * (3.5 * (1 - h) ** 1.6 + 1);
@@ -257,6 +257,9 @@ export const DUGOUT_GLASS = { opacity: 0.4, env: 1.0, lmBoost: 3.0, milk: [0.72,
  */
 export const SIGN_RE = /^M_SignWhite\b/;
 export const SIGN = { lm: 0.25, emDay: 0.55, emNight: 2.4 } as const;
+/** v5 polish: the deck's parapet LED line and soffit strip (M_PodiumStrip) read in the key visual at golden hour. */
+export const EDGE_LED = { emDay: 2.5, emNight: 9.0 } as const;
+const EDGE_RE = /^M_PodiumStrip\b/;
 /** v4: city blocks (site.py _city, lit windows). */
 export const CITY_RE = /^M_Building\d/;
 /** v4 LED ribbons on the tier fronts (signage.py). */
@@ -365,6 +368,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
       mat.envMapIntensity = 0.1;                    // the glossy face mirrored the golden sky over the picture
     }
     if (SIGN_RE.test(mat.name)) { ex.emDay = SIGN.emDay; ex.emNight = SIGN.emNight; mat.emissive.setRGB(1, 1, 1); }
+    if (EDGE_RE.test(mat.name)) { ex.emDay = EDGE_LED.emDay; ex.emNight = EDGE_LED.emNight; }
     if (CITY_RE.test(mat.name)) ex.emLate = true;          // v4: city windows light up only toward night
     if (RIBBON_RE.test(mat.name) && ribbonTexture.value) mat.emissiveMap = ribbonTexture.value;   // v4: sponsor ads, not the placeholder
     if (DUGOUT_GLASS_RE.test(mat.name)) {            // v4: the canopy sheet faces down, so its bake is the shaded underside

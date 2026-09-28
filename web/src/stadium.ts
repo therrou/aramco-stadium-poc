@@ -89,9 +89,17 @@ export function patchLightsChunk(chunk: string) {
 	vec3 iblRadiance = mix( getIBLRadiance( geometryViewDir, geometryNormal, material.roughness ), getIBLRadianceB( geometryViewDir, geometryNormal, material.roughness ), uEnvBlend ) * lmSo;
 #ifdef PLANAR_REFLECT
 	iblRadiance = mix( iblRadiance, planarReflection( material.roughness ) * slabMask( diffuseColor.rgb ), uReflectOn );
+#endif
+#ifdef SAIL_SKIN
+	reflectedLight.directSpecular += sailGlint( geometryNormal, geometryViewDir );
 #endif`)
     .replace(COAT_RAD_RE, `clearcoatRadiance += mix( getIBLRadiance( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), getIBLRadianceB( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), uEnvBlend ) * lmSo;`);
 }
+
+/** M_SailSkin: pearl metal with a clear coat (Blender coat 0.35, coat roughness 0.08). */
+export const SAIL_COAT = { clearcoat: 0.35, clearcoatRoughness: 0.08 };
+/** The live sun's highlight on the coat (sailGlint): a bit broader than the coat so the glint reads from afar. */
+export const SAIL_GLINT = { roughness: 0.15, gain: 1.0 };
 
 export const PARS = /* glsl */ `
 uniform sampler2D uLmB; uniform float uLmBlend; uniform float uRgbmRange; uniform float uLmGamma;
@@ -100,6 +108,18 @@ varying vec3 vWorldPosB;
 // v4: lightmaps ship as gamma RGB (manifest lmGamma, webexport/rgbm.py); RGBM when uLmGamma is 0 (older assets)
 vec3 rgbmDecode( vec4 c ) { return uLmGamma > 0.0 ? pow( max( c.rgb, vec3( 0.0 ) ), vec3( uLmGamma ) ) * uRgbmRange : c.rgb * c.a * uRgbmRange; }
 uniform vec3 uSun; uniform vec3 uSunDirView; uniform vec3 uAmbient;   // S1: the sun and sky as in treeLight
+#ifdef SAIL_SKIN
+// User 2026-09-28: the sun's glint on the petals. The matte skin (v5) spreads the sun in the sky HDR into a dull
+// sheen, so the clear coat gets the live sun as a GGX highlight: uSun is the sun's irradiance (0 at night).
+vec3 sailGlint( vec3 n, vec3 v ) {
+  vec3 l = uSunDirView, h = normalize( l + v );
+  float nl = max( dot( n, l ), 0.0 ), nv = max( dot( n, v ), 1e-3 ), nh = max( dot( n, h ), 0.0 );
+  float a2 = pow4( ${SAIL_GLINT.roughness.toFixed(3)} );
+  float d = a2 / ( PI * pow2( nh * nh * ( a2 - 1.0 ) + 1.0 ) );
+  float f = 0.04 + 0.96 * pow( 1.0 - max( dot( v, h ), 0.0 ), 5.0 );
+  return uSun * nl * d * f * ${SAIL_COAT.clearcoat.toFixed(2)} * ${SAIL_GLINT.gain.toFixed(2)} / ( 4.0 * nv );
+}
+#endif
 ${BICUBIC_GLSL}
 ${PLANAR_GLSL}
 ${SAIL_NIGHT_GLSL}
@@ -228,8 +248,6 @@ export const SAIL_RE = /^M_SailSkin\b/;
 /** A5 (v2): sail skin reflection at night (Cycles shows dark skin with LEDs, the web mirrored the dusk sky). Tuned in Task 8. */
 export const SAIL_NIGHT_ENV = 1.0;
 export const sailEnvIntensity = (n: number) => 1 + (SAIL_NIGHT_ENV - 1) * n;
-/** M_SailSkin: pearl metal with a clear coat (Blender coat 0.35, coat roughness 0.08). */
-export const SAIL_COAT = { clearcoat: 0.35, clearcoatRoughness: 0.08 };
 
 /** glTF gives MeshStandardMaterial (the export writes no coat): swap the sail skin for a physical copy. */
 export function toCoatedSail(m: THREE.MeshStandardMaterial) {

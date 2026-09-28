@@ -58,7 +58,9 @@ async function boot() {
     try {
       const m = await fetchManifest();
       showProgress(0);
-      return collect(m, await runJobs(assetJobs(m, L, [startState]), showProgress, done), [startState]);
+      // trees load with the first frame too: streamed in later they popped into a finished view (user 2026-09-28)
+      const out = await runJobs([...assetJobs(m, L, [startState]), ...treeJobs(m, L)], showProgress, done);
+      return { ...collect(m, out, [startState]), ...collectTrees(m, out) };
     } catch (e) {
       const file = e instanceof AssetError ? e.file : "assets";
       return new Promise((res) => showError(file, String((e as Error).message), () => res(attempt())));
@@ -147,18 +149,15 @@ function start(renderer: THREE.WebGLRenderer, a: Assets, L: ReturnType<typeof ma
     if (o.name.startsWith("site__") || o.name.startsWith("site_mid__")) o.layers.set(NO_REFLECT_LAYER);   // v4: site_mid as the far site
     else if (/^(bowl|pitch)__/.test(o.name)) o.layers.set(BOWL_LAYER);   // behind the shell in any plaza reflection
   });
-  // lighter first load (2026-09-28): the trees and the other lighting state stream in after the first frame
-  const addTrees = () => runJobs(treeJobs(a.manifest, L), () => {}).then((out) => {
-    const { trees, impostors } = collectTrees(a.manifest, out);
-    if (!trees) return;
-    a.trees = trees; a.impostors = impostors;
-    setupTrees(trees, impostors, lighting.outdoor);
-    trees.scene.traverse((o) => {          // S1: tree meshes cast; impostor billboards (shader material) do not
+  if (a.trees) {
+    setupTrees(a.trees, a.impostors, lighting.outdoor);
+    a.trees.scene.traverse((o) => {          // S1: tree meshes cast; impostor billboards (shader material) do not
       const m = o as THREE.Mesh;
       if (m.isMesh) { m.castShadow = !(m.material as THREE.ShaderMaterial).isShaderMaterial; m.receiveShadow = true; m.layers.set(NO_REFLECT_LAYER); }
     });
-    scene.add(trees.scene);
-  }).catch((e) => console.warn("Trees failed to load:", e));
+    scene.add(a.trees.scene);
+  }
+  // lighter first load (2026-09-28): the other lighting state streams in after the first frame
   const stateLoads = new Map<State, Promise<void>>();
   /** Loads a lighting state once; a failed or incomplete one is dropped so a later request retries it. */
   const loadState = (s: State) => {
@@ -371,9 +370,9 @@ function start(renderer: THREE.WebGLRenderer, a: Assets, L: ReturnType<typeof ma
       rig.jump({ eye: p.eye.map((v, k) => v + off[k]) as V3, target: p.target.map((v, k) => v + off[k]) as V3, hfov: p.hfov });
     } });
 
-  // after the first frame is on screen: trees, then the other lighting state (ready before anyone asks)
+  // after the first frame is on screen: the other lighting state (ready before anyone asks)
   requestAnimationFrame(() => setTimeout(() => {
-    addTrees().then(() => Promise.all(STATES.filter((s) => s !== startState).map((s) => loadState(s).catch((e) => console.warn(`Lighting state ${s} failed to load:`, e)))));
+    for (const s of STATES) if (s !== startState) loadState(s).catch((e) => console.warn(`Lighting state ${s} failed to load:`, e));
   }, 0));
 
   // ?dpr=fixed keeps the start pixel ratio (captures, frame-time measurements)

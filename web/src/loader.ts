@@ -95,8 +95,8 @@ export async function fetchJson(url: string, file: string, f: typeof fetch = fet
 }
 
 /**
- * First-frame jobs: the stadium, seats and the start state's lighting. The other lighting state (stateJobs)
- * and the trees (treeJobs) stream in after the first frame, which keeps ~9 MB off the initial load.
+ * First-frame jobs: the stadium, seats and the start state's lighting (main adds treeJobs). The other
+ * lighting state (stateJobs) streams in after the first frame, which keeps ~6 MB off the initial load.
  */
 export function assetJobs(m: Manifest, L: ReturnType<typeof makeLoaders>, states: State[] = STATES): Job<unknown>[] {
   const jobs: Job<unknown>[] = [

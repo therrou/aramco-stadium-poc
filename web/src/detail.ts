@@ -154,7 +154,7 @@ export const GROUND_MAP_GLSL = /* glsl */ `
  * the grid fades to its mean, so distant blocks do not shimmer. cityWindow() also masks the night emission,
  * so the baked lit-window light lands inside the windows.
  */
-export const CITY = { floor: 3.3, bay: 3.8, glass: 0.42 } as const;
+export const CITY = { floor: 3.3, bay: 3.8, glass: 0.42, lit: 0.28, gain: 2.6 } as const;
 export const CITY_GLSL = NOISE_GLSL + /* glsl */ `
 float cityWindow( vec3 pB, vec3 nB ) {
   if ( abs( nB.z ) > 0.5 ) return 0.0;
@@ -166,6 +166,27 @@ float cityWindow( vec3 pB, vec3 nB ) {
   float fade = 1.0 - smoothstep( 0.35, 0.9, max( w.x, w.y ) );
   float ground = step( ${CITY.floor.toFixed(2)}, pB.z );            // no windows on the plinth floor band
   return mix( 0.68 * 0.56, wx * wy, fade ) * ground;
+}
+/**
+ * User 2026-09-28: the baked window light read as random blobs across the facade (its map is far coarser
+ * than the grid). Night light is now per window: CITY.lit of the windows are on, each with its own warm or
+ * cool white and brightness, framed by cityWindow's mask; far away it fades to the mean, like the grid.
+ */
+vec3 cityLights( vec3 pB, vec3 nB ) {
+  if ( abs( nB.z ) > 0.5 ) return vec3( 0.0 );
+  float face = abs( nB.x ) > abs( nB.y ) ? ( nB.x > 0.0 ? 1.0 : 2.0 ) : ( nB.y > 0.0 ? 3.0 : 4.0 );
+  float along = abs( nB.x ) > abs( nB.y ) ? pB.y : pB.x;
+  vec2 cell = floor( vec2( along / ${CITY.bay.toFixed(2)}, pB.z / ${CITY.floor.toFixed(2)} ) );
+  float across = abs( nB.x ) > abs( nB.y ) ? pB.x : pB.y;               // separates parallel facades
+  float h = dHash( vec3( cell, face * 17.0 + floor( across ) ) );
+  float on = step( h, ${CITY.lit.toFixed(2)} );
+  float k = h / ${CITY.lit.toFixed(2)};                                  // 0-1 among the lit ones
+  vec3 col = mix( vec3( 1.0, 0.78, 0.52 ), vec3( 0.85, 0.9, 1.0 ), step( 0.7, k ) ) * ( 0.6 + 0.4 * fract( k * 7.3 ) );
+  float win = cityWindow( pB, nB );
+  vec2 w = fwidth( vec2( along / ${CITY.bay.toFixed(2)}, pB.z / ${CITY.floor.toFixed(2)} ) );
+  float fade = 1.0 - smoothstep( 0.35, 0.9, max( w.x, w.y ) );
+  vec3 mean = vec3( 1.0, 0.85, 0.68 ) * 0.8 * ${CITY.lit.toFixed(2)};
+  return mix( mean, col * on, fade ) * win;
 }
 vec3 cityFacade( vec3 pB, vec3 nB ) {
   vec2 blk = floor( pB.xy / 18.0 );

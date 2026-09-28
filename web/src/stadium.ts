@@ -5,7 +5,7 @@ import { SUN_VIS_GLSL } from "./sunShadow";
 import { PLANAR_GLSL, isPlanarMaterial } from "./planarReflect";
 import { BOARDS, LED_EMISSIVE_GLSL, LED_GLSL_BOARDS, isLedBoard, ledUniforms, ribbonTexture } from "./ledBoards";
 import { isScreen, screenTexture } from "./screens";
-import { BICUBIC_GLSL, CITY_GLSL, CONCRETE_GLSL, GRASS_GLSL, GROUND_GLSL, GROUND_MAP_GLSL, NET, NET_GLSL, detailFor } from "./detail";
+import { BICUBIC_GLSL, CITY, CITY_GLSL, CONCRETE_GLSL, GRASS_GLSL, GROUND_GLSL, GROUND_MAP_GLSL, NET, NET_GLSL, detailFor } from "./detail";
 
 const LM_RE = /vec4 lightMapTexel = texture2D\( lightMap, vLightMapUv \);\s*vec3 lightMapIrradiance = lightMapTexel\.rgb \* lightMapIntensity;/;
 const IBL_IRR_RE = /iblIrradiance \+= getIBLIrradiance\( geometryNormal \);/;
@@ -369,7 +369,11 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
     }
     if (SIGN_RE.test(mat.name)) { ex.emDay = SIGN.emDay; ex.emNight = SIGN.emNight; mat.emissive.setRGB(1, 1, 1); }
     if (EDGE_RE.test(mat.name)) { ex.emDay = EDGE_LED.emDay; ex.emNight = EDGE_LED.emNight; }
-    if (CITY_RE.test(mat.name)) ex.emLate = true;          // v4: city windows light up only toward night
+    if (CITY_RE.test(mat.name)) {                    // v4: city windows light up only toward night
+      ex.emLate = true;
+      mat.emissiveMap = null;                        // per-window light is procedural (detail.ts cityLights); the baked map drew blobs
+      mat.emissive.setRGB(1, 1, 1);
+    }
     if (RIBBON_RE.test(mat.name) && ribbonTexture.value) mat.emissiveMap = ribbonTexture.value;   // v4: sponsor ads, not the placeholder
     if (DUGOUT_GLASS_RE.test(mat.name)) {            // v4: the canopy sheet faces down, so its bake is the shaded underside
       mat.opacity = DUGOUT_GLASS.opacity;           // (dark); Cycles shows clear glass lit by the sky: thin it, mirror the sky
@@ -412,7 +416,7 @@ export function setupStadiumMaterials(root: THREE.Object3D, shared: SharedUnifor
         .replace("#include <envmap_physical_pars_fragment>", "#include <envmap_physical_pars_fragment>\n" + DETAIL_GLSL[detail])
         .replace("#include <map_fragment>", "#include <map_fragment>\n" + DETAIL_MAP[detail])
       if (detail === "city") s.fragmentShader = s.fragmentShader     // v4: night window light only inside the windows
-        .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n{ " + FLAT_NORMAL_B + "totalEmissiveRadiance *= 0.3 + 2.2 * cityWindow( vWorldPosB, nB ); }");
+        .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n{ " + FLAT_NORMAL_B + `totalEmissiveRadiance *= ${CITY.gain.toFixed(2)} * cityLights( vWorldPosB, nB ); }`);
       if (led) s.fragmentShader = s.fragmentShader
         .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n" + LED_EMISSIVE_GLSL);
       if (ex.special === "sailLeds")

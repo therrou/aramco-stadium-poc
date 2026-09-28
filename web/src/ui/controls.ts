@@ -3,9 +3,8 @@ import type { State } from "../loader";
 import { MODE_CAMERAS } from "../heroViews";
 
 export interface ControlHandlers { lighting(l: State): void; reset(): void; fullscreen(): void; camera(cam: string): void; autoOrbit(on: boolean): void }
-const LABEL: Record<State, string> = { day: "Day", golden: "Golden hour", night: "Night" };
-/** Lighting menu: Day hidden for now (user request 2026-09-27); still listed when a link opened it. */
-const MENU: State[] = ["golden", "night"];
+const LABEL: Record<State, string> = { golden: "Golden hour", night: "Night" };
+const MENU: State[] = ["golden", "night"];   // Day removed (user request 2026-09-28)
 
 /** Viewport overlays: title, lighting dropdown, reset/fullscreen (no zoom: user 2026-09-28), mode bar and hints. */
 export class Controls {
@@ -15,10 +14,9 @@ export class Controls {
   clearCamera() { this.lastCam = null; }
   render(s: AppState) {
     const seat = s.view.kind === "seat", noOrbit = seat || s.inside;
-    const menu = MENU.includes(s.lighting) ? MENU : [s.lighting, ...MENU];
     this.root.innerHTML = `
       <div class="ov ov-title"><h2>Aramco Stadium.</h2><span class="eyebrow">Al Khobar · Saudi Arabia</span></div>
-      <label class="ov ov-light"><span class="visually-hidden">Lighting</span><select>${menu.map((l) =>
+      <label class="ov ov-light"><span class="visually-hidden">Lighting</span><select>${MENU.map((l) =>
         `<option value="${l}"${l === s.lighting ? " selected" : ""}>${LABEL[l]}</option>`).join("")}</select></label>
       <div class="ov ov-zoom">
         <button class="icon" data-z="reset" aria-label="Reset view" title="Reset view">⟲</button>

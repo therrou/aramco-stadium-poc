@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CameraRig, LOOK_HFOV, MAX_POLAR, MIN_DISTANCE_M, MAX_DISTANCE_M, TARGET_DISC_M, clampOrbit, pivotOf, exposureAt, polarLimit, zoomedPose } from "./camera";
+import { CameraRig, CENTRE_Z, LOOK_HFOV, MAX_POLAR, MIN_DISTANCE_M, MAX_DISTANCE_M, TARGET_DISC_M, clampOrbit, orbitPoseOf, pivotOf, exposureAt, polarLimit, zoomedPose } from "./camera";
 import { planFlight } from "./route";
 import type { Pose } from "./flyto";
 
@@ -225,6 +225,20 @@ describe("orbit pivot of a Blender camera pose", () => {
     const p = pivotOf(cam);
     dir(p).forEach((v, k) => expect(v).toBeCloseTo(dir(cam)[k], 9));
     expect(Math.hypot(...p.target.map((v, k) => v - cam.eye[k]))).toBeGreaterThanOrEqual(MIN_DISTANCE_M);
+  });
+});
+
+describe("aerials orbit the stadium axis (user request 2026-09-28)", () => {
+  const sw = { eye: [-330, -470, 230] as [number, number, number], target: [-276.7634, -392.5649, 195.7995] as [number, number, number], hfov: 46 };
+  it("the overview keeps its eye and aims at the oculus centre", () => {
+    const p = orbitPoseOf("CAM_Aerial_SW", sw);
+    expect(p.eye).toEqual(sw.eye);
+    expect(p.target).toEqual([0, 0, CENTRE_Z]);
+    expect(clampOrbit(p.eye, p.target)).toEqual({ eye: p.eye, target: p.target });   // inside the orbit limits
+  });
+  it("every aerial is centred; other cameras keep their own view", () => {
+    for (const n of ["CAM_Aerial_E", "CAM_Aerial_Dusk", "CAM_Top"]) expect(orbitPoseOf(n, sw).target).toEqual([0, 0, CENTRE_Z]);
+    expect(orbitPoseOf("CAM_Bowl", sw)).toEqual(pivotOf(sw));
   });
 });
 

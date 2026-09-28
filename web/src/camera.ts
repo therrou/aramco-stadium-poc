@@ -80,6 +80,18 @@ export function pivotOf(p: Pose): Pose {
   return { ...p, target: p.eye.map((v, k) => v + u[k] * t) as V3 };
 }
 
+/**
+ * User request 2026-09-28: the aerial views orbit around the stadium's own axis (the oculus centre), not
+ * where their view ray meets the ground (CAM_Aerial_SW's lands ~58 m north-east of it, so the stadium sat
+ * off-centre and the orbit swung around a point on the pitch's far side). CENTRE_Z puts the whole shell
+ * (ground to the 58 m rim) in the middle of the frame. The eye stays; only the aim changes.
+ */
+export const CENTRE_Z = 25;
+export const AERIAL_RE = /^CAM_(Aerial|Top)/;
+export const centredPivot = (p: Pose): Pose => ({ ...p, target: [0, 0, CENTRE_Z] });
+/** Orbit pose for a named Blender camera: aerials aim at the stadium axis, the rest keep their view. */
+export const orbitPoseOf = (name: string, p: Pose): Pose => (AERIAL_RE.test(name) ? centredPivot(p) : pivotOf(p));
+
 export class CameraRig {
   camera = new THREE.PerspectiveCamera(40, 1, NEAR_M, 8000);
   controls: OrbitControls;

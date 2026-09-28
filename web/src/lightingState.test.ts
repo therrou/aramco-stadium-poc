@@ -3,16 +3,16 @@ import { LightingTransition, exposure, emissionStrength, lateEmission, sunToward
 
 describe("transitions (Review Focus 1)", () => {
   it("reaches the target in ~1 s", () => {
-    const t = new LightingTransition("day");
+    const t = new LightingTransition("golden");
     t.request("night");
     for (let i = 0; i < 60; i++) t.update(1 / 60);
     expect(t.night).toBeCloseTo(1, 6);
   });
   it("settles when a transition completes with nothing pending (from = to, blend = 1)", () => {
-    const t = new LightingTransition("day");
+    const t = new LightingTransition("golden");
     t.request("night");
     for (let i = 0; i < 59; i++) t.update(1 / 60);
-    expect(t.from).toBe("day");
+    expect(t.from).toBe("golden");
     for (let i = 0; i < 5; i++) t.update(1 / 60);
     expect([t.from, t.to, t.blend]).toEqual(["night", "night", 1]);
     expect(t.night).toBe(1);
@@ -20,7 +20,7 @@ describe("transitions (Review Focus 1)", () => {
     expect([t.from, t.to, t.blend]).toEqual(["night", "golden", 0]);
   });
   it("a queued state still plays, then settles on it", () => {
-    const t = new LightingTransition("day");
+    const t = new LightingTransition("golden");
     t.request("night");
     t.update(0.3);
     t.request("golden");
@@ -28,17 +28,17 @@ describe("transitions (Review Focus 1)", () => {
     expect([t.from, t.to, t.blend]).toEqual(["golden", "golden", 1]);
   });
   it("reversal mid-way continues from the current value (no jump)", () => {
-    const t = new LightingTransition("day");
+    const t = new LightingTransition("golden");
     t.request("night");
     for (let i = 0; i < 18; i++) t.update(1 / 60);
     const before = t.night;
-    t.request("day");
+    t.request("golden");
     expect(t.night).toBeCloseTo(before, 6);
     for (let i = 0; i < 120; i++) t.update(1 / 60);
-    expect(t.night).toBeCloseTo(0, 6);
+    expect(t.night).toBeCloseTo(0.6, 6);
   });
   it("third state is queued; values stay continuous and end at golden", () => {
-    const t = new LightingTransition("day");
+    const t = new LightingTransition("golden");
     t.request("night");
     let prev = t.night, maxStep = 0;
     for (let i = 0; i < 240; i++) {
@@ -76,20 +76,24 @@ describe("Blender formulas", () => {
 import { missingLightmaps, envSizeMismatch } from "./lightingState";
 
 describe("lightmaps-present flag (fix round 1)", () => {
-  const full = { day: { bowl: 1, site: 1 }, golden: { bowl: 1, site: 1 }, night: { bowl: 1, site: 1 } };
+  const full = { golden: { bowl: 1, site: 1 }, night: { bowl: 1, site: 1 } };
   it("complete bake -> nothing missing", () => {
     expect(missingLightmaps(full, ["bowl", "site"])).toEqual([]);
   });
   it("no bake -> everything missing", () => {
-    const none = { day: {}, golden: {}, night: {} };
-    expect(missingLightmaps(none, ["bowl"])).toEqual(["day/bowl", "golden/bowl", "night/bowl"]);
+    const none = { golden: {}, night: {} };
+    expect(missingLightmaps(none, ["bowl"])).toEqual(["golden/bowl", "night/bowl"]);
   });
   it("partial bake names what is missing, including groups only some states have", () => {
-    const partial = { day: { bowl: 1, site: 1 }, golden: { bowl: 1 }, night: { bowl: 1, extra: 1 } };
-    expect(missingLightmaps(partial, ["bowl", "site"])).toEqual(["day/extra", "golden/site", "golden/extra", "night/site"]);
+    const partial = { golden: { bowl: 1 }, night: { bowl: 1, extra: 1 } };
+    expect(missingLightmaps(partial, ["bowl", "site"])).toEqual(["golden/site", "golden/extra", "night/site"]);
   });
   it("no groups at all counts as missing", () => {
-    expect(missingLightmaps({ day: {}, golden: {}, night: {} }, [])).toEqual(["(no lightmap groups)"]);
+    expect(missingLightmaps({ golden: {}, night: {} }, [])).toEqual(["(no lightmap groups)"]);
+  });
+  it("lazy states: only the loaded ones are checked", () => {
+    expect(missingLightmaps({ night: { bowl: 1 } }, ["bowl"])).toEqual([]);
+    expect(missingLightmaps({ golden: {} }, ["bowl"])).toEqual(["golden/bowl"]);
   });
 });
 

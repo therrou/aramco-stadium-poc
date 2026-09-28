@@ -1,7 +1,11 @@
 import type { V3 } from "./coords";
-import { STATES, type State } from "./loader";
+import type { State } from "./loader";
 
-export const STATE_NIGHT: Record<State, number> = { day: 0, golden: 0.6, night: 1 };
+/**
+ * Day (night 0) is no longer a state (2026-09-28), but the formulas below keep their n = 0 end: golden hour
+ * (n 0.6) is interpolated from it, so the day constants (emDay, BOWL.day, SPEC_OCC.k.day...) stay.
+ */
+export const STATE_NIGHT: Record<State, number> = { golden: 0.6, night: 1 };
 export const TRANSITION_S = 1.0;
 const QUEUED_S = 0.25;
 const smooth = (t: number) => t * t * (3 - 2 * t);
@@ -49,16 +53,18 @@ export const sunStrength = (n: number) => 3 * Math.max(0, 1 - (n / 0.85) ** 2);
 export const sunColor = (n: number): V3 => [1, 0.93 - 0.33 * T(n), 0.82 - 0.52 * T(n)];
 
 /**
- * The single "lightmaps present" check (fix round 1): every state must have a lightmap for every group,
- * where the groups are those the glb references plus any the manifest lists. Returns "state/group" for
- * each gap; an empty list means the lightmap path can be used.
+ * The single "lightmaps present" check (fix round 1): every loaded state must have a lightmap for every
+ * group, where the groups are those the glb references plus any the given states list. Returns "state/group"
+ * for each gap; an empty list means the lightmap path can be used. States load lazily, so only the ones
+ * passed in are checked.
  */
-export function missingLightmaps(lightmaps: Record<State, Record<string, unknown>>, glbGroups: Iterable<string>): string[] {
+export function missingLightmaps(lightmaps: Partial<Record<State, Record<string, unknown>>>, glbGroups: Iterable<string>): string[] {
+  const states = Object.keys(lightmaps) as State[];
   const groups = new Set(glbGroups);
-  for (const s of STATES) for (const g of Object.keys(lightmaps[s])) groups.add(g);
+  for (const s of states) for (const g of Object.keys(lightmaps[s]!)) groups.add(g);
   if (groups.size === 0) return ["(no lightmap groups)"];
   const out: string[] = [];
-  for (const s of STATES) for (const g of groups) if (!lightmaps[s][g]) out.push(`${s}/${g}`);
+  for (const s of states) for (const g of groups) if (!lightmaps[s]![g]) out.push(`${s}/${g}`);
   return out;
 }
 

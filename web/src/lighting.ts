@@ -5,7 +5,7 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { ENV_ROTATION_Y, toThree } from "./coords";
 import { lateEmission, LightingTransition, emissionStrength, envSizeMismatch, exposure, sunColor, sunStrength, sunToward } from "./lightingState";
-import { STATES, type Assets, type State } from "./loader";
+import type { Assets, State } from "./loader";
 import { Sky } from "./background";
 import { SAIL_RE, sailEnvIntensity, specOccK, type SharedUniforms } from "./stadium";
 import { clearTreeUniforms, makeTreeUniforms, updateTreeUniforms } from "./treeLight";
@@ -82,9 +82,10 @@ export class Lighting {
   private fallbackHemi?: THREE.HemisphereLight;
   private bg = new THREE.Color();
   private shown = "";
-  /** false when all env maps exist but differ in size: specular then switches to the target env, no blend. */
+  /** false when the env maps differ in size: specular then switches to the target env, no blend. */
   private envBlend = true;
   readonly hasEnv: boolean;
+  private gen: THREE.PMREMGenerator;
   /** A5 (v2): sail skin materials, whose reflection fades at night. */
   private sails: THREE.MeshStandardMaterial[];
   constructor(private renderer: THREE.WebGLRenderer, private scene: THREE.Scene, private a: Assets,
@@ -92,15 +93,10 @@ export class Lighting {
               public shared: SharedUniforms, readonly hasLightmaps: boolean) {
     this.t = new LightingTransition(initial);
     this.sails = [...groups.values()].flat().filter((m) => SAIL_RE.test(m.name));
-    this.hasEnv = STATES.every((s) => a.env[s]);
-    if (this.hasEnv) {
-      const bad = envSizeMismatch(STATES.map((s) => a.env[s]!.image as { width: number; height: number }));
-      if (bad) { console.warn(`Lighting: ${bad}; specular env maps will switch without blending.`); this.envBlend = false; }
-    }
+    this.hasEnv = !!a.env[initial];
     this.shared.uRgbmRange.value = a.manifest.rgbmRange;
-    const gen = new THREE.PMREMGenerator(renderer);
-    for (const s of STATES) if (a.env[s]) this.pmrem[s] = gen.fromEquirectangular(a.env[s]!).texture;
-    gen.dispose();
+    this.gen = new THREE.PMREMGenerator(renderer);
+    this.addEnv(initial);
     if (this.hasEnv) scene.add(this.sky.mesh);
     if (!this.hasLightmaps) {                            // Review Focus 4: viewer still works before the bake
       this.fallbackHemi = new THREE.HemisphereLight(0xdfe8ff, 0x6b5a40, 1.0);
@@ -109,7 +105,26 @@ export class Lighting {
     }
     this.update(0, 0);   // bind lightMap/envMap before the first compile, so USE_LIGHTMAP/USE_ENVMAP are set
   }
-  request(s: State) { this.t.request(s); }
+  /** A state is usable once its lightmaps (and env, when the start state had one) are in the assets. */
+  ready(s: State) { return !!this.a.lightmaps[s] && (!this.hasEnv || !!this.pmrem[s]); }
+  /**
+   * A lazily loaded state (loader.stateJobs): PMREM its env and upload its lightmaps now, so the first
+   * transition to it does not stall on texture uploads.
+   */
+  addState(s: State) {
+    if (this.hasEnv) this.addEnv(s);
+    for (const t of Object.values(this.a.lightmaps[s] ?? {})) this.renderer.initTexture(t);
+  }
+  private addEnv(s: State) {
+    const env = this.a.env[s];
+    if (!env || this.pmrem[s]) return;
+    const sizes = [env, ...Object.values(this.a.env).filter((e): e is THREE.DataTexture => !!e && e !== env)]
+      .map((e) => e.image as { width: number; height: number });
+    const bad = envSizeMismatch(sizes);
+    if (bad && this.envBlend) { console.warn(`Lighting: ${bad}; specular env maps will switch without blending.`); this.envBlend = false; }
+    this.pmrem[s] = this.gen.fromEquirectangular(env).texture;
+  }
+  request(s: State) { if (this.ready(s)) this.t.request(s); }
   update(dt: number, cameraExposure: number, camera?: THREE.Camera) {
     this.t.update(dt);
     const { from, to } = this.t, e = this.t.eased, n = this.t.night;
@@ -117,8 +132,8 @@ export class Lighting {
     if (key !== this.shown) {                           // rebind the pair only when it changes
       this.shown = key;
       if (this.hasLightmaps) for (const [g, mats] of this.groups) for (const m of mats) {
-        m.lightMap = this.a.lightmaps[from][g] ?? null;
-        (m.userData.lmB as { value: THREE.Texture | null }).value = this.a.lightmaps[to][g] ?? null;
+        m.lightMap = this.a.lightmaps[from]?.[g] ?? null;
+        (m.userData.lmB as { value: THREE.Texture | null }).value = this.a.lightmaps[to]?.[g] ?? null;
       }
       if (this.hasEnv) {
         const envA = this.pmrem[this.envBlend ? from : to]!;   // no blend: both samplers get the target env

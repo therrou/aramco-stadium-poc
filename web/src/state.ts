@@ -45,6 +45,6 @@ export function reduce(s: AppState, a: Action): AppState {
   }
 }
 
-/** `?state=` URL param: only day/golden/night are accepted. */
+/** `?state=` URL param: only golden/night are accepted (old ?state=day links open at night). */
 export const parseLighting = (v: string | null): State =>
   STATES.includes(v as State) ? (v as State) : initialState.lighting;

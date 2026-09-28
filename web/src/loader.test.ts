@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { runJobs, AssetError, fetchJson, collect, type Manifest } from "./loader";
+import { runJobs, AssetError, fetchJson, collect, assetJobs, stateJobs, treeJobs, type Manifest, type makeLoaders } from "./loader";
 
 const ok = (v: string) => async (p: (f: number) => void) => { p(0.5); p(1); return v; };
 const fail = async () => { throw new Error("404"); };
@@ -48,10 +48,25 @@ it("A7: lightmaps with mips are sampled trilinear; single-level ones stay linear
   withMips.mipmaps = [{}, {}, {}] as any;
   flat.mipmaps = [{}] as any;
   const m = { stadium: "s.glb", seats: "b", sections: "x", cameras: "c", trees: null, rgbmRange: 16, version: 1,
-    states: { day: { night: 0, exposure: 0, env: null, lightmaps: { bowl: "a.ktx2", site: "b.ktx2" } },
-              golden: { night: 0.6, exposure: 0, env: null, lightmaps: {} }, night: { night: 1, exposure: 0, env: null, lightmaps: {} } } } as Manifest;
+    states: { golden: { night: 0.6, exposure: 0, env: null, lightmaps: { bowl: "a.ktx2", site: "b.ktx2" } },
+              night: { night: 1, exposure: 0, env: null, lightmaps: {} } } } as Manifest;
   const a = collect(m, new Map<string, unknown>([["a.ktx2", withMips], ["b.ktx2", flat]]));
-  expect(a.lightmaps.day.bowl.minFilter).toBe(THREE.LinearMipmapLinearFilter);
-  expect(a.lightmaps.day.site.minFilter).toBe(THREE.LinearFilter);
-  expect(a.lightmaps.day.bowl.generateMipmaps).toBe(false);
+  expect(a.lightmaps.golden!.bowl.minFilter).toBe(THREE.LinearMipmapLinearFilter);
+  expect(a.lightmaps.golden!.site.minFilter).toBe(THREE.LinearFilter);
+  expect(a.lightmaps.golden!.bowl.generateMipmaps).toBe(false);
+});
+
+it("lighter first load: only the start state's lightmaps are fetched up front; trees are separate", () => {
+  const m = { stadium: "s.glb", seats: "b", sections: "x", cameras: "c", rgbmRange: 16, version: 1,
+    trees: { glb: "t.glb", impostors: { palm: { atlas: "p.ktx2", frames: 8, size: 1, centerZ: 0 } } },
+    states: { day: { night: 0, exposure: 0, env: "d.hdr", lightmaps: { bowl: "d.ktx2" } },
+              golden: { night: 0.6, exposure: 0, env: "g.hdr", lightmaps: { bowl: "g.ktx2" } },
+              night: { night: 1, exposure: 0, env: "n.hdr", lightmaps: { bowl: "n.ktx2" } } } } as unknown as Manifest;
+  const L = {} as ReturnType<typeof makeLoaders>;
+  const files = (j: { file: string }[]) => j.map((x) => x.file);
+  expect(files(assetJobs(m, L, ["night"]))).toEqual(["s.glb", "b", "x", "c", "n.ktx2", "n.hdr"]);
+  expect(files(stateJobs(m, L, "golden"))).toEqual(["g.ktx2", "g.hdr"]);
+  expect(files(treeJobs(m, L))).toEqual(["t.glb", "p.ktx2"]);
+  expect(treeJobs(m, L).every((j) => j.optional)).toBe(true);
+  expect(files(assetJobs(m, L))).not.toContain("d.ktx2");   // an old manifest's day state is ignored
 });

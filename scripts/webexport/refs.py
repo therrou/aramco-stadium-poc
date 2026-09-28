@@ -5,7 +5,7 @@ import bpy
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CAMS = ("CAM_Aerial_Dusk", "CAM_Approach", "CAM_Seat_212")
-STATES = {"day": 0.0, "golden": 0.6, "night": 1.0}
+STATES = {"golden": 0.6, "night": 1.0}   # day dropped 2026-09-28
 
 
 def render_one(cam, state, samples=128, width=1920, height=1080):

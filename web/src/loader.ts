@@ -6,8 +6,9 @@ import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import type { V3 } from "./coords";
 
-export type State = "day" | "golden" | "night";
-export const STATES: State[] = ["day", "golden", "night"];
+/** Day was dropped (2026-09-28, unused on the frontend): old manifests may still list it, and it is ignored. */
+export type State = "golden" | "night";
+export const STATES: State[] = ["golden", "night"];
 
 export interface Manifest {
   version: number;
@@ -19,7 +20,7 @@ export interface Manifest {
   seats: string;
   sections: string;
   cameras: string;
-  states: Record<State, { night: number; exposure: number; env: string | null; lightmaps: Record<string, string> }>;
+  states: Partial<Record<State, { night: number; exposure: number; env: string | null; lightmaps: Record<string, string> }>>;
 }
 export interface CameraDef { eye: V3; target: V3; hfov: number; exposure: number }
 export interface SectionView { eye: V3; target: V3; fov: number; seat: string }
@@ -32,8 +33,9 @@ export interface Assets {
   seatsBin: ArrayBuffer;
   sections: SectionsDoc;
   cameras: Record<string, CameraDef>;
-  lightmaps: Record<State, Record<string, THREE.Texture>>;
-  env: Record<State, THREE.DataTexture | null>;
+  /** Only the states loaded so far: the start state up front, the other one later (loadState). */
+  lightmaps: Partial<Record<State, Record<string, THREE.Texture>>>;
+  env: Partial<Record<State, THREE.DataTexture | null>>;
   /** Far-tree impostor atlases by species; a species whose atlas failed to load is absent. */
   impostors: Record<string, { atlas: THREE.Texture; frames: number; size: number; centerZ: number }>;
 }
@@ -92,53 +94,76 @@ export async function fetchJson(url: string, file: string, f: typeof fetch = fet
   return r.json();
 }
 
-export function assetJobs(m: Manifest, L: ReturnType<typeof makeLoaders>): Job<unknown>[] {
+/**
+ * First-frame jobs: the stadium, seats and the start state's lighting. The other lighting state (stateJobs)
+ * and the trees (treeJobs) stream in after the first frame, which keeps ~9 MB off the initial load.
+ */
+export function assetJobs(m: Manifest, L: ReturnType<typeof makeLoaders>, states: State[] = STATES): Job<unknown>[] {
   const jobs: Job<unknown>[] = [
     { file: m.stadium, run: (p) => L.gltf.loadAsync(BASE + m.stadium, pct(p)) },
     { file: m.seats, run: (p) => { L.file.setResponseType("arraybuffer"); return L.file.loadAsync(BASE + m.seats, pct(p)); } },
     { file: m.sections, run: () => fetchJson(BASE + m.sections, m.sections) },
     { file: m.cameras, run: () => fetchJson(BASE + m.cameras, m.cameras) },
   ];
-  if (m.trees) jobs.push({ file: m.trees.glb, optional: true, run: (p) => L.gltf.loadAsync(BASE + m.trees!.glb, pct(p)) });
-  for (const s of STATES) {
-    const st = m.states[s];
-    for (const [, f] of Object.entries(st.lightmaps)) jobs.push({ file: f, run: () => L.ktx2.loadAsync(BASE + f) });
-    if (st.env) jobs.push({ file: st.env, run: () => L.hdr.loadAsync(BASE + st.env!) });
-  }
-  if (m.trees) for (const im of Object.values(m.trees.impostors))
-    jobs.push({ file: im.atlas, optional: true, run: () => L.ktx2.loadAsync(BASE + im.atlas) });
+  for (const s of states) jobs.push(...stateJobs(m, L, s));
   return jobs;
 }
 
-export function collect(m: Manifest, out: Map<string, unknown>): Assets {
-  const lightmaps = {} as Assets["lightmaps"];
-  const env = {} as Assets["env"];
-  for (const s of STATES) {
-    lightmaps[s] = {};
-    for (const [g, f] of Object.entries(m.states[s].lightmaps)) {
-      const t = out.get(f) as THREE.Texture;
-      t.colorSpace = THREE.NoColorSpace;
-      t.channel = 1;                                    // TEXCOORD_1 = LightmapUV
-      // A7 (v2): the KTX2 lightmaps carry mips (optimize_web.sh); without them distant charts shimmered
-      t.minFilter = (t.mipmaps?.length ?? 0) > 1 ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
-      t.generateMipmaps = false;
-      lightmaps[s][g] = t;
-    }
-    env[s] = m.states[s].env ? (out.get(m.states[s].env!) as THREE.DataTexture) : null;
-    if (env[s]) env[s]!.mapping = THREE.EquirectangularReflectionMapping;
+export function stateJobs(m: Manifest, L: ReturnType<typeof makeLoaders>, s: State): Job<unknown>[] {
+  const st = m.states[s];
+  if (!st) return [];
+  const jobs: Job<unknown>[] = Object.values(st.lightmaps).map((f) => ({ file: f, run: () => L.ktx2.loadAsync(BASE + f) }));
+  if (st.env) jobs.push({ file: st.env, run: () => L.hdr.loadAsync(BASE + st.env!) });
+  return jobs;
+}
+
+/** Trees and their impostor atlases: all optional, a failure just leaves the site without trees. */
+export function treeJobs(m: Manifest, L: ReturnType<typeof makeLoaders>): Job<unknown>[] {
+  if (!m.trees) return [];
+  return [
+    { file: m.trees.glb, optional: true, run: (p) => L.gltf.loadAsync(BASE + m.trees!.glb, pct(p)) },
+    ...Object.values(m.trees.impostors).map((im) => ({ file: im.atlas, optional: true, run: () => L.ktx2.loadAsync(BASE + im.atlas) })),
+  ];
+}
+
+/** One lighting state's lightmaps and env from finished jobs. */
+export function collectState(m: Manifest, s: State, out: Map<string, unknown>) {
+  const lightmaps: Record<string, THREE.Texture> = {};
+  const st = m.states[s];
+  for (const [g, f] of Object.entries(st?.lightmaps ?? {})) {
+    const t = out.get(f) as THREE.Texture;
+    t.colorSpace = THREE.NoColorSpace;
+    t.channel = 1;                                    // TEXCOORD_1 = LightmapUV
+    // A7 (v2): the KTX2 lightmaps carry mips (optimize_web.sh); without them distant charts shimmered
+    t.minFilter = (t.mipmaps?.length ?? 0) > 1 ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
+    t.generateMipmaps = false;
+    lightmaps[g] = t;
   }
+  const env = st?.env ? (out.get(st.env) as THREE.DataTexture) : null;
+  if (env) env.mapping = THREE.EquirectangularReflectionMapping;
+  return { lightmaps, env };
+}
+
+export function collectTrees(m: Manifest, out: Map<string, unknown>) {
   const impostors: Assets["impostors"] = {};
   if (m.trees) for (const [sp, im] of Object.entries(m.trees.impostors)) {
     const t = out.get(im.atlas) as THREE.Texture | null | undefined;
     if (t) { t.colorSpace = THREE.SRGBColorSpace; impostors[sp] = { ...im, atlas: t }; }
   }
+  return { trees: m.trees ? ((out.get(m.trees.glb) as GLTF) ?? null) : null, impostors };
+}
+
+/** First-frame assets; trees and the states not in `states` are filled in later. */
+export function collect(m: Manifest, out: Map<string, unknown>, states: State[] = STATES): Assets {
+  const lightmaps: Assets["lightmaps"] = {}, env: Assets["env"] = {};
+  for (const s of states) ({ lightmaps: lightmaps[s], env: env[s] } = collectState(m, s, out));
   return {
     manifest: m,
     stadium: out.get(m.stadium) as GLTF,
-    trees: m.trees ? ((out.get(m.trees.glb) as GLTF) ?? null) : null,
+    trees: null,
     seatsBin: out.get(m.seats) as ArrayBuffer,
     sections: out.get(m.sections) as SectionsDoc,
     cameras: out.get(m.cameras) as Record<string, CameraDef>,
-    lightmaps, env, impostors,
+    lightmaps, env, impostors: {},
   };
 }

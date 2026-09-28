@@ -49,8 +49,8 @@ describe("app state (v2: overview | seat)", () => {
 
 import { parseLighting } from "./state";
 describe("?state= param (fix round 1)", () => {
-  it("accepts day/golden/night", () => {
-    expect(parseLighting("day")).toBe("day");
+  it("accepts golden/night; day is gone", () => {
+    expect(parseLighting("day")).toBe(initialState.lighting);
     expect(parseLighting("golden")).toBe("golden");
     expect(parseLighting("night")).toBe("night");
   });

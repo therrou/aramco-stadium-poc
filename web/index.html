@@ -8,6 +8,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;900&family=Nunito:wght@800&family=Playfair+Display:wght@700&display=swap" />
   <link rel="stylesheet" href="/src/ui/theme.css" />
+  <!-- KTX2 transcoder: fetched in parallel with the app instead of after the first texture request -->
+  <link rel="preload" href="/basis/basis_transcoder.js" as="fetch" crossorigin="anonymous" />
+  <link rel="preload" href="/basis/basis_transcoder.wasm" as="fetch" crossorigin="anonymous" />
 </head>
 <body>
   <header id="header"></header>

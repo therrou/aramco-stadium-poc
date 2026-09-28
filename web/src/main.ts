@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import { loadDisplayFont } from "./assetBase";
 import { missingCapabilities, probe } from "./capabilities";
-import { AssetError, assetJobs, collect, fetchManifest, makeLoaders, runJobs, type Assets } from "./loader";
-import { Perf, exposeViewerHooks } from "./perf";
+import { AssetError, assetJobs, collect, collectState, collectTrees, fetchManifest, makeLoaders, runJobs, stateJobs, treeJobs, type Assets } from "./loader";
+import { DprGovernor, Perf, exposeViewerHooks } from "./perf";
 import { hideOverlay, showError, showFatal, showProgress } from "./ui";
 import { toBlender, type V3 } from "./coords";
 import { imageStats, type Box } from "./frameStats";
@@ -10,7 +10,7 @@ import { parseSeats, indexSections, SeatDirectory, parseSeatParam, formatSeat, t
 import type { Tier } from "./tiers";
 import { SeatField, SeatHighlight, nearSections, visibleSections, NEAR_SEAT_CAP, SEAT_LOD_DIST, SEAT_NEAR_M } from "./seats";
 import { SectionPatches } from "./sectionPatches";
-import { CameraRig, ZOOM_S, pivotOf } from "./camera";
+import { CameraRig, ZOOM_S, orbitPoseOf, pivotOf } from "./camera";
 import { isInside } from "./route";
 import { cameraPose, seatViewPose, SEAT_EXP, type Pose } from "./flyto";
 import { nearestSeatToRay } from "./seatPick";
@@ -53,11 +53,12 @@ async function boot() {
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   const L = makeLoaders(renderer);
   const done = new Map<string, unknown>();
+  const startState = parseLighting(params.get("state"));
   const attempt = async (): Promise<Assets> => {
     try {
       const m = await fetchManifest();
       showProgress(0);
-      return collect(m, await runJobs(assetJobs(m, L), showProgress, done));
+      return collect(m, await runJobs(assetJobs(m, L, [startState]), showProgress, done), [startState]);
     } catch (e) {
       const file = e instanceof AssetError ? e.file : "assets";
       return new Promise((res) => showError(file, String((e as Error).message), () => res(attempt())));
@@ -65,7 +66,7 @@ async function boot() {
   };
   const assets = await attempt();
   try {
-    start(renderer, assets);
+    start(renderer, assets, L, startState);
     hideOverlay();
   } catch (e) {
     console.error(e);
@@ -74,19 +75,19 @@ async function boot() {
   }
 }
 
-function start(renderer: THREE.WebGLRenderer, a: Assets) {
+function start(renderer: THREE.WebGLRenderer, a: Assets, L: ReturnType<typeof makeLoaders>, startState: State) {
   if (params.get("chrome") === "0") document.body.classList.add("bare");
   const scene = new THREE.Scene();
   scene.add(a.stadium.scene);
   const table = parseSeats(a.seatsBin), idx = indexSections(table), dir = new SeatDirectory(table, idx);
   const stage = document.getElementById("stage")!;
   const rig = new CameraRig(renderer.domElement);
-  const overview = pivotOf(cameraPose(a.cameras["CAM_Aerial_SW"]));   // v3: orbit around the stadium, same view
+  const overview = orbitPoseOf("CAM_Aerial_SW", cameraPose(a.cameras["CAM_Aerial_SW"]));   // orbit around the stadium axis
   // final review 2: exposure follows each flight; back at the overview it is CAM_Aerial_SW's, not ?cam's
   const overviewExp = a.cameras["CAM_Aerial_SW"].exposure ?? -0.4;
   const camParam = params.get("cam");
   const camDef = camParam ? a.cameras[camParam] : undefined;
-  rig.jump(camDef ? pivotOf(cameraPose(camDef)) : overview, camDef?.exposure ?? overviewExp);
+  rig.jump(camDef ? orbitPoseOf(camParam!, cameraPose(camDef)) : overview, camDef?.exposure ?? overviewExp);
   const camera = rig.camera;
   const shared: SharedUniforms = { uLmBlend: { value: 0 }, uEnvB: { value: null }, uEnvBlend: { value: 0 }, uRgbmRange: { value: a.manifest.rgbmRange }, uLmGamma: { value: a.manifest.lmGamma ?? 0 }, uNight: { value: 0 }, uSoK: { value: specOccK(0) } };
   // one "lightmaps present" flag for materials and Lighting: every state needs every group, else no lightmaps at all
@@ -94,7 +95,7 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   a.stadium.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh && typeof o.userData.lightmap === "string") glbGroups.add(o.userData.lightmap); });
   const missing = missingLightmaps(a.lightmaps, glbGroups);
   const useLightmaps = missing.length === 0;
-  if (!useLightmaps && STATES.some((s) => Object.keys(a.lightmaps[s]).length > 0))
+  if (!useLightmaps && Object.values(a.lightmaps).some((l) => Object.keys(l).length > 0))
     console.warn(`Lighting: incomplete lightmap bake, using fallback lights. Missing: ${missing.join(", ")}`);
   ledUniforms.uAds.value = makeAdAtlas();              // pitch LED ad boards (aramco / AKQA)
   const screenFeed = makeScreenFeed(() => (ledUniforms.uAds.value?.image as CanvasImageSource) ?? null);   // v4: looping screens
@@ -108,7 +109,6 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial;
     if (m?.userData && (m.userData.emDay > 0 || m.userData.emNight > 0)) emissive.add(m);
   });
-  const startState = parseLighting(params.get("state"));
   const lighting = new Lighting(renderer, scene, a, groups, [...emissive], startState, shared, useLightmaps);
   // S1 (v3): live sun shadows sharpen the baked sun (lightmapped materials) and shade the seats and trees
   shared.uSun = lighting.outdoor.uSun;
@@ -147,14 +147,35 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     if (o.name.startsWith("site__") || o.name.startsWith("site_mid__")) o.layers.set(NO_REFLECT_LAYER);   // v4: site_mid as the far site
     else if (/^(bowl|pitch)__/.test(o.name)) o.layers.set(BOWL_LAYER);   // behind the shell in any plaza reflection
   });
-  if (a.trees) {
-    setupTrees(a.trees, a.impostors, lighting.outdoor);
-    a.trees.scene.traverse((o) => {          // S1: tree meshes cast; impostor billboards (shader material) do not
+  // lighter first load (2026-09-28): the trees and the other lighting state stream in after the first frame
+  const addTrees = () => runJobs(treeJobs(a.manifest, L), () => {}).then((out) => {
+    const { trees, impostors } = collectTrees(a.manifest, out);
+    if (!trees) return;
+    a.trees = trees; a.impostors = impostors;
+    setupTrees(trees, impostors, lighting.outdoor);
+    trees.scene.traverse((o) => {          // S1: tree meshes cast; impostor billboards (shader material) do not
       const m = o as THREE.Mesh;
       if (m.isMesh) { m.castShadow = !(m.material as THREE.ShaderMaterial).isShaderMaterial; m.receiveShadow = true; m.layers.set(NO_REFLECT_LAYER); }
     });
-    scene.add(a.trees.scene);
-  }
+    scene.add(trees.scene);
+  }).catch((e) => console.warn("Trees failed to load:", e));
+  const stateLoads = new Map<State, Promise<void>>();
+  /** Loads a lighting state once; a failed or incomplete one is dropped so a later request retries it. */
+  const loadState = (s: State) => {
+    if (lighting.ready(s)) return Promise.resolve();
+    let p = stateLoads.get(s);
+    if (!p) {
+      p = runJobs(stateJobs(a.manifest, L, s), () => {}).then((out) => {
+        const st = collectState(a.manifest, s, out);
+        const gaps = useLightmaps ? missingLightmaps({ [s]: st.lightmaps }, glbGroups) : [];
+        if (gaps.length) throw new Error(`incomplete bake, missing ${gaps.join(", ")}`);
+        a.lightmaps[s] = st.lightmaps; a.env[s] = st.env;
+        lighting.addState(s);
+      }).catch((e) => { stateLoads.delete(s); throw e; });
+      stateLoads.set(s, p);
+    }
+    return p;
+  };
   const composer = makeComposer(renderer, scene, camera);
   const perf = new Perf(params.has("stats"));
   // Review Focus 5: size to the stage (the sidebar or bottom sheet takes the rest), not to the window
@@ -196,11 +217,18 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
     }
     if (act.type === "back" || act.type === "camera") {
       rig.setMode("orbit");
-      const c = act.type === "camera" ? a.cameras[act.camera] : undefined;
+      const name = act.type === "camera" ? act.camera : "", c = name ? a.cameras[name] : undefined;
       if (act.type === "back") controls.clearCamera();
-      rig.flyTo(c ? pivotOf(cameraPose(c)) : overview, c?.exposure ?? overviewExp);
+      rig.flyTo(c ? orbitPoseOf(name, cameraPose(c)) : overview, c?.exposure ?? overviewExp);
     }
-    if (act.type === "lighting") lighting.request(app.lighting);
+    if (act.type === "lighting") {
+      const want = app.lighting;
+      if (lighting.ready(want)) lighting.request(want);
+      else loadState(want).then(() => { if (app.lighting === want) lighting.request(want); }, (e) => {
+        console.warn(`Lighting state ${want} failed to load:`, e);
+        if (app.lighting === want) dispatch({ type: "lighting", lighting: lighting.t.to });   // menu back to what is shown
+      });
+    }
     rig.setAutoOrbit(app.autoOrbit);
     syncHighlight();
     syncUrl();
@@ -319,10 +347,11 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
   };
 
   exposeViewerHooks({ get fps() { return perf.fps; }, info: renderer.info, scene, flyTo: (p: Pose) => rig.flyTo(p),
-    setState: (s: State) => dispatch({ type: "lighting", lighting: s }),
+    /** Resolves once the state is loaded (states stream in lazily); tick after it to finish the fade. */
+    setState: (s: State) => { dispatch({ type: "lighting", lighting: s }); return loadState(s); },
     get night() { return lighting.t.night; }, tick: (dt = 1 / 60) => frame(dt),
     renderer, composer, camera, rig, lighting, stadium: a.stadium.scene, assets: a,
-    get app() { return app; }, dispatch, pickSeat, pivot: pivotOf,
+    get app() { return app; }, dispatch, pickSeat, pivot: pivotOf, orbitPose: orbitPoseOf,
     /** v2 Task 1: metrics of the next rendered frame (drawing buffer is read in the same task as the render). */
     stats: (box?: Box) => {
       frame(0);
@@ -342,11 +371,22 @@ function start(renderer: THREE.WebGLRenderer, a: Assets) {
       rig.jump({ eye: p.eye.map((v, k) => v + off[k]) as V3, target: p.target.map((v, k) => v + off[k]) as V3, hfov: p.hfov });
     } });
 
+  // after the first frame is on screen: trees, then the other lighting state (ready before anyone asks)
+  requestAnimationFrame(() => setTimeout(() => {
+    addTrees().then(() => Promise.all(STATES.filter((s) => s !== startState).map((s) => loadState(s).catch((e) => console.warn(`Lighting state ${s} failed to load:`, e)))));
+  }, 0));
+
+  // ?dpr=fixed keeps the start pixel ratio (captures, frame-time measurements)
+  const dprGov = params.get("dpr") === "fixed" ? null : new DprGovernor(renderer.getPixelRatio());
   const clock = new THREE.Clock();
   renderer.setAnimationLoop(() => {
     perf.begin();
     renderer.info.reset();
-    frame(clock.getDelta());
+    const dt = clock.getDelta();
+    // hidden tabs throttle rAF, which would read as a slow GPU
+    const lower = document.hidden ? null : dprGov?.sample(dt);
+    if (lower) { renderer.setPixelRatio(lower); resize(); }
+    frame(dt);
     perf.end();
   });
 }

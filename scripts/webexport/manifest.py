@@ -4,8 +4,9 @@ import os
 
 from . import rgbm
 
-STATES = {"day": 0.0, "golden": 0.6, "night": 1.0}
-EXPOSURE = {"day": 0.25, "golden": 0.55, "night": 0.75}   # lighting._render_settings: 0.25 + 0.5 n
+# Day (n 0) is not baked or shipped any more (2026-09-28): the frontend only shows golden hour and night.
+STATES = {"golden": 0.6, "night": 1.0}
+EXPOSURE = {"golden": 0.55, "night": 0.75}   # lighting._render_settings: 0.25 + 0.5 n
 
 
 def new():

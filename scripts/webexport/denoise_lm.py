@@ -125,7 +125,7 @@ def denoise_png(path, rgbm_range, out_path=None):  # pragma: no cover - runs in 
     return float(np.abs(dn[valid] - before).mean() / max(before.mean(), 1e-6))
 
 
-def run(raw, rgbm_range=16, states=("day", "golden", "night"), groups=None):  # pragma: no cover - runs in Blender
+def run(raw, rgbm_range=16, states=("golden", "night"), groups=None):  # pragma: no cover - runs in Blender
     report = {}
     for s in states:
         src, dst = os.path.join(raw, "lightmaps_noisy", s), os.path.join(raw, "lightmaps", s)
